@@ -1,37 +1,29 @@
-"""Grader for the population-PK autoinduction forecasting task.
+"""Verification test harness for the population-PK exposure forecasting task.
 
-Requirement map (each material instruction requirement -> the check that grades it):
+Instruction requirement map (material requirement -> corresponding test):
 
-  R1  /app/submission/predict.py exists and runs the documented CLI .......... test_submission_predicts
-  R2  OUT.csv has the exact columns, one row per subject, finite positive
+  R1  /app/submission/predict.py exists and supports documented CLI .......... test_submission_predicts
+  R2  OUT.csv contains exact schema, one row per subject, finite positive
       values ................................................................... test_output_format
-  R3  finishes within 120 s (measured on the predictor process alone) ......... test_runtime_budget
-  R4  normalized reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on the held-out
+  R3  Terminates within 120 s runtime limit .................................... test_runtime_budget
+  R4  Evaluated reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on held-out
       cohort ................................................................... test_accuracy_pass_bar
-  R5  same output on a repeated run ............................................. test_deterministic
-  R6  "must write only OUT.csv": the four input CSVs are byte-identical
-      after both runs, nothing else appears in the input dir, and the
-      submission tree gains no writes .......................................... test_inputs_unmodified
-  R7  incomplete covariates (missing row / unusable weight, age or sex) fall
-      back per field to 70 kg, 45 years and M without aborting or changing
-      other subjects ........................................................... test_covariates_*
-  R8  --horizon-h H recomputes all three quantities over exactly [t14, t14+H)
-      (trough at exactly t14+H), graded against held-out truth for
-      H in heldout.EXTRA_HORIZONS (1.05 / 6.05 / 24.05 / 47.95 h), default 24.0
-      identical to explicit 24, and invalid values exit non-zero with no output  test_horizon_*
-  R9  --estimator {map,population} picks the per-subject strategy; default map
-      is today's behaviour, population depends only on dosing+covariates (not on
-      sample values, sample timing, censor flags, row count or subject id) while
-      still responding to dose and weight, and any other literal value exits
-      non-zero with no output ................................................. test_estimator_*
+  R5  Outputs agree across deterministic repeated runs ......................... test_deterministic
+  R6  "must write only OUT.csv": input directory remains unmodified, no extra
+      files created, submission directory untouched ............................ test_inputs_unmodified
+  R7  Incomplete covariates (missing row or unusable weight, age, sex) fall
+      back per field to 70 kg, 45 years, and M without side-effects ............ test_covariates_*
+  R8  --horizon-h H recomputes exposure over [t14, t14+H), validated against
+      heldout.EXTRA_HORIZONS (1.05 / 6.05 / 24.05 / 47.95 h), default 24.0
+      matches explicit 24, invalid arguments reject cleanly .................... test_horizon_*
+  R9  --estimator {map,population} toggles individualization; default map
+      fits random effects, population derives predictions purely from dosing
+      and covariates (invariant to sample counts/concentrations/censor flags) ... test_estimator_*
 
-Held-out truth is regenerated here from a secret seed and kept in a root-only
-directory; the agent's predictor is run through the agent uid on a separate,
-agent-owned copy of the label-stripped inputs. Every synthetic ("toy") fixture is a
-ROOT-OWNED read-only input directory with a separate agent-owned output directory, so a
-submission can neither rewrite the fixture it is graded on nor write anywhere but
-OUT.csv. This suite never writes under /logs/verifier - the pipeline prelude/finale own
-the reward file; the binary reward comes from this suite's exit status (pytest).
+Held-out ground truth is synthesized dynamically from a secret seed within a
+root-only test harness. Predictions run under unprivileged agent uid against
+isolated fixture directories. The test suite evaluates submission adherence and
+exits with a status code consumed by the verifier pipeline runner.
 """
 
 import csv

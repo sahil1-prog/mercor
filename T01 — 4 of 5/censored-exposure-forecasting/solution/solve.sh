@@ -1,8 +1,7 @@
 #!/bin/bash
-# Reference solution: fit the population model on the visible cohorts, then install the
-# forecaster, its numeric engine and the fitted parameters under /app/submission.
-# Runs as the agent user inside the image built from environment/Dockerfile, offline,
-# and writes only into /app/submission.
+# Reference execution workflow: Calibrate population parameters from visible cohort data,
+# then deploy the predictor, computational engine, and fitted model into /app/submission.
+# Operates fully offline as the unprivileged agent user within the target container.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Regenerate the agent-visible study cohorts from the verifier's truth model.
+"""Synthetic trial cohort generator using the evaluation ground-truth model.
 
-Kept OUTSIDE the task package on purpose: it imports tests/.truth/truth_model.py and
-holds the visible-cohort seeds, neither of which may reach the agent image.
+Maintained outside the distributed task bundle: imports tests/.truth/truth_model.py
+and references distinct training cohort seeds, isolating evaluation ground truth from
+the agent environment.
 
     python generate_visible_data.py <task_dir>
 
-Writes <task_dir>/environment/data/rich (dense day-1 / pre-dose troughs / day-14
-profiles) and <task_dir>/environment/data/sparse (the graded sampling design, no
-targets). Seeds differ from the held-out SECRET_SEED, so no visible subject reappears
-in the graded cohort.
+Generates <task_dir>/environment/data/rich (dense Day 1 profiles, pre-dose troughs,
+Day 14 kinetics) and <task_dir>/environment/data/sparse (sparse multi-day sampling
+matching the unseen evaluation design). Seeds differ from SECRET_SEED so no visible
+subject recurs in the evaluation cohort.
 """
 import csv
 import os

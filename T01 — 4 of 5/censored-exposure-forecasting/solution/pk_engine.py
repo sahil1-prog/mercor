@@ -1,12 +1,12 @@
-"""Numeric core of the reference submission.
+"""Numerical computation engine for the reference pharmacokinetic model.
 
-Oral absorption with a lag time into one central compartment, with apparent clearance
-driven by an enzyme pool that is induced by the drug itself:
+Implements an oral one-compartment disposition model featuring absorption delay
+and concentration-dependent enzyme autoinduction dynamics:
 
     dE/dt = kenz * (1 + Emax * C / (EC50 + C)) - kenz * E,   E(0) = 1,   CL = CL0 * E
 
-This file is shared by fit_population.py (run once, offline, on /app/data) and by the
-installed predictor. It never reads anything except what its callers pass in.
+Shared by both the offline population calibration module (fit_population.py) and
+the runtime exposure predictor (predict.py). Operates purely on arguments passed in.
 """
 import math
 

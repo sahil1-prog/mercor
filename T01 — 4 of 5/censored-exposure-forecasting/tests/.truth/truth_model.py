@@ -1,9 +1,9 @@
-"""Population oral PK simulator with concentration-driven enzyme autoinduction.
+"""Generative population pharmacokinetic simulator with enzyme autoinduction.
 
-This module is the single source of truth for the generative process behind the
-multiple-ascending-dose study. The visible cohorts and the graded held-out cohort are
-both drawn from it (with different seeds). It lives only in the verifier image and is
-never copied into the agent image.
+Authoritative source of truth for the clinical study simulation. Calibrates both
+the training datasets and unseen evaluation cohort using independent seeds.
+Isolated within the verification image and excluded from candidate workspaces.
+"""
 
 Model (per subject i; WT in kg, AGE in years):
 

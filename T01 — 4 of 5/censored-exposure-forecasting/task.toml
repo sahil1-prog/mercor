@@ -21,7 +21,7 @@ tags = [
   "dose-titration",
 ]
 expert_time_estimate_hours = 10.0
-difficulty_explanation = "Clearance is induced by the drug's own concentration through an enzyme pool, most subjects double their dose after the sampling period, and the induced troughs are largely below the LLOQ; the forecast must extrapolate a censored-likelihood population model through the titration step and into washout."
+difficulty_explanation = "Systemic clearance is dynamically induced via drug-stimulated enzyme turnover, with the majority of subjects doubling their dose following the sparse sampling window. Informative post-dose troughs fall largely below the assay quantification limit, requiring a censored-likelihood population PK model to extrapolate through dose escalation and terminal washout."
 
 # The graded reward is binary (the pipeline finale writes reward.txt from the suite's exit
 # status): a submission scores 1 only when EVERY check passes, including the stated pass bar

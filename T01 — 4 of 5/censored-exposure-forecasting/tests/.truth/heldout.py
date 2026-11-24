@@ -1,13 +1,12 @@
-"""Deterministically regenerate the graded held-out PK cohort.
+"""Generates the unseen evaluation pharmacokinetic cohort deterministically.
 
-This module is the verifier's copy of the generative process. It is root-only
-under ``tests/`` and is never shipped to the solver image. It mirrors the
-authoring simulator (``truth_model.py``) so the truth the grader
-computes is the same process that produced the visible cohorts - but it uses a
-DIFFERENT secret seed and the sparse (no day-14 profile) sampling design.
+Verifier-internal generative simulation module isolated under ``tests/.truth/``
+and excluded from the agent container image. Shares the underlying structural
+mechanisms of ``truth_model.py`` using a separate secret evaluation seed and
+sparse sampling protocol.
 
-The cohort is written into a fresh directory as four label-stripped input CSVs
-plus ``truth.csv`` (the held-out answers, which never leave this root-only dir).
+Emits label-stripped evaluation inputs across four CSVs alongside the isolated
+``truth.csv`` ground-truth benchmark targets.
 """
 
 from __future__ import annotations

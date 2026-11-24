@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Reference day-14 exposure forecaster.
+"""Reference implementation for Day 14 pharmacokinetic exposure forecasting.
 
-For each subject: build covariate-adjusted typical parameters from the population model
-saved beside this file (pop_params.json), fit the subject's random effects by MAP
-against its own samples under a censored (M3) likelihood, then integrate the forecast
-window [t14, t14 + H) with the subject's actual dose rows - including any titration step
-after the sampling period, which the concentration-driven enzyme model carries forward.
+Processes subject-level dosing records, imputes missing covariate values, and calculates
+individualized parameter estimates conditioned on the pre-trained population model
+(pop_params.json). Under MAP estimation, individual random effects are resolved against
+plasma concentration samples using an M3 censored-data likelihood. Forward integration
+then projects exposure across [t14, t14 + H), accounting for enzyme turnover autoinduction
+and intra-study dose titration.
 
-  --horizon-h H          window length in hours, 0 < H <= 168 (default 24)
-  --estimator map        per-subject MAP fit (default)
-  --estimator population no random effects: dose rows and covariates only
+  --horizon-h H          Evaluation window duration in hours, 0 < H <= 168 (default: 24.0)
+  --estimator map        Empirical-Bayes MAP subject estimation (default)
+  --estimator population Fixed population forecast conditioned on dosing and covariates only
 
-Reads only --input-dir and this directory; writes only --output.
+Reads solely from --input-dir and this script's directory; writes solely to --output.
 """
 import argparse
 import csv

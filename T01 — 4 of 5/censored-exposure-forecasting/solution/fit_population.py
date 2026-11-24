@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Fit the population model on the visible cohorts and save it as pop_params.json.
+"""Calibrate the population pharmacokinetic model on visible historical trial cohorts.
 
-Model: oral absorption with lag, one central compartment, clearance CL0 * E(t) where E
-is an enzyme pool induced by the drug (turnover with kenz, stimulation Emax*C/(EC50+C)).
-Covariates on the typical values: allometric weight (V ~ WT^1, CL0 ~ WT^0.75), a power
-of age on CL0, and a sex factor on CL0 and on V.
+Formulates a one-compartment oral absorption structure with absorption delay and
+concentration-mediated enzyme autoinduction: CL(t) = CL0 * E(t), where enzyme turnover
+follows dE/dt = kenz * (1 + Emax * C / (EC50 + C)) - kenz * E. Fixed-effect covariates
+incorporate standard allometric scaling for weight, power scaling for age, and categorical
+factors for sex.
 
-Below-LLOQ samples enter through their censored likelihood (Beal M3), never dropped
-and never imputed.
+Concentrations falling below the quantification limit (LLOQ) are handled via Beal's M3
+censored-likelihood formulation without data exclusion or ad-hoc replacement.
 
-Estimation, all deterministic:
-  1. naive pooled fit of the typical values and covariate effects on the rich cohort;
-  2. iterative two-stage: per-subject MAP random effects on rich + sparse subjects,
-     then typical values, covariate effects, between-subject SDs and residual error are
-     re-estimated from those fits; repeated until the typical values settle.
+Estimation procedure:
+  1. Pooled initialization across rich cohort profiles.
+  2. Iterative two-stage refinement: calculates MAP subject estimates, then updates
+     fixed-effect population parameters, inter-individual variance, and residual error.
 
-Usage: fit_population.py OUT.json [DATA_DIR]   (reads /app/data by default; writes only OUT.json)
+Usage: fit_population.py OUT.json [DATA_DIR]
 """
 import csv
 import json
