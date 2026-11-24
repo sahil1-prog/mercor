@@ -25,7 +25,10 @@
     },
     {
       "kind": "regrade",
-      "rewards": [1.0, 1.0],
+      "rewards": [
+        1.0,
+        1.0
+      ],
       "who": "OpenWorldEngineer",
       "agent": "OpenWorldEngineer (human expert author), AI-assisted",
       "when": "2026-11-24",
@@ -44,16 +47,40 @@
       "budget": "local Docker, --network none --cpus 4 --memory 8g",
       "receipt": "constant output: 11 passed, 12 failed; regression shortcut: 13 passed, 10 failed; both fail test_accuracy_pass_bar",
       "note": "constant output (one value for every subject) -> 0. Dose-and-covariate regression of rich-cohort day-14 exposure per mg on weight, sex and age, no PK model: raw 0.514 at 24 h -> 0 (the same idea reached reward 0.499 on the previous revision)."
+    },
+    {
+      "kind": "reference",
+      "reward": 1.0,
+      "receipt": "pytest 24/24 passed in 175.35s (current 24-check suite)",
+      "note": "grade 3 after the do-not-modify check was extended to every held-out run plus a final sweep; host shared with two other runs",
+      "who": "OpenWorldEngineer",
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g"
+    },
+    {
+      "kind": "probe",
+      "reward": 0.0,
+      "receipt": "current suite: 22 passed, 2 failed (test_horizon_accuracy_matches_truth, test_zz_nothing_modified_after_all_runs); previous 23-check suite: 23 passed, reward 1",
+      "note": "tamper probe: the reference predictor plus a write into /app/submission only when --horizon-h is given. Passed the previous suite, scores 0 on the current one.",
+      "who": "OpenWorldEngineer",
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g"
     }
   ],
-  "nop": [0.0],
+  "nop": [
+    0.0
+  ],
   "studio_runs": [],
   "studio_runs_note": "No Studio runs on this upload yet. Every run on the previous upload is void: the agent-visible data, instruction and grader changed.",
   "anti_cheat_checks": [
     "held-out cohort regenerated inside the verifier from tests/.truth (root-only), never present in the agent image",
     "no held-out sample falls inside the day-14 window (assert_no_day14_samples), and all held-out samples precede the day-8 titration step",
     "output read with O_NOFOLLOW + realpath containment; inputs root-owned; only the out/ directory is agent-writable",
-    "input CSVs and the submission tree hashed before and after runs (test_inputs_unmodified)",
+    "input CSVs and the whole submission tree hashed and re-checked after the default runs, after every held-out --horizon-h/--estimator run, around every toy run and in a final sweep (test_zz_nothing_modified_after_all_runs); a flag-gated tamper probe scores 0",
     "covariate fallbacks graded on several distinct fixtures (missing row, blank/junk weight, blank/junk/zero age, blank/unknown/lowercase sex)",
     "horizon graded against truth at 1.05 / 6.05 / 24.05 / 47.95 h plus an additivity identity, so rounding or scaling the window fails",
     "population mode graded by sample- and id-invariance with a map-mode control, so ignoring the option fails",

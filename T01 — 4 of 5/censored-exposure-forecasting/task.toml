@@ -28,7 +28,7 @@ difficulty_explanation = "Clearance increases dynamically through drug-induced e
 # reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on the held-out cohort at the default window and
 # at each graded window (tests/.truth/heldout.py EXTRA_HORIZONS = 1.05 / 6.05 / 24.05 /
 # 47.95 h).
-# 1.0 witness: the reference in solution/ (solve.sh) passes all 23 checks in local Docker
+# 1.0 witness: the reference in solution/ (solve.sh) passes all 24 checks in local Docker
 # runs of both images; its continuous rewards are 0.783 (24 h) / 0.806 / 0.872 / 0.782 /
 # 0.667 at the graded windows. A perfect continuous reward is not reachable (censored
 # sparse data, assay noise), but the graded score is binary, so the witness scores 1.0.

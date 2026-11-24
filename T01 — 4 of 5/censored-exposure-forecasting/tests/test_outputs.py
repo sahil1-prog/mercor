@@ -356,7 +356,10 @@ def test_deterministic():
     _assert_inputs_untouched()
 
 
-# ---- R6 ------------------------------------------------------------------------------------
+# ---- R6: "write OUT.csv and no other file; leave the input directory and /app/submission
+# unchanged" (instruction). Enforced after the default runs here, after every held-out
+# --horizon-h/--estimator run (_check_horizon_accuracy), around every toy run (_run_toy), and
+# once more after the whole suite (test_zz_nothing_modified_after_all_runs).
 def _assert_inputs_untouched():
     for name, digest in _INPUT_SHA.items():
         path = os.path.join(_INPUT_DIR, name)
@@ -697,6 +700,9 @@ def _check_horizon_accuracy(horizon, extra_args):
     assert elapsed <= BUDGET_S, (
         f"horizon {horizon}h {extra_args} run took {elapsed:.1f}s > {BUDGET_S}s budget "
         f"(stated limit {TIME_LIMIT_S}s)")
+    # "Leave the input directory and /app/submission unchanged" holds for every invocation,
+    # not only the default one: a predictor that tampers only under --horizon-h fails here.
+    _assert_inputs_untouched()
     _, rows = _read_output(out_path)
     got_ids = {r["subject_id"] for r in rows}
     assert got_ids == set(_IDS), (
@@ -1047,3 +1053,23 @@ def test_estimator_rejects_invalid_values():
     produced = sorted(os.listdir(o))
     assert set(produced) <= {"good_est_0.csv", "good_est_1.csv"}, (
         f"the program wrote unexpected files: {produced}")
+
+
+# ---- R6, final sweep --------------------------------------------------------------------------
+def test_zz_nothing_modified_after_all_runs():
+    """Runs last (file order): after every default, --horizon-h, --estimator and toy run the
+    held-out inputs, every toy input directory, every output directory and the whole
+    /app/submission tree must still be exactly as the suite left them. A predictor that edits
+    its inputs or its own code only under some flag, or that restores a file between runs
+    the earlier checks saw, is caught here."""
+    _predict_once()
+    _run_second()
+    _assert_inputs_untouched()
+    for d in list(_TOY_SHA):
+        _toy_inputs_intact(d)
+    for out_dir, expected in _TOY_EXPECTED.items():
+        assert not os.path.islink(out_dir), f"toy output directory {out_dir} became a symlink"
+        produced = set(os.listdir(out_dir))
+        assert produced <= expected, (
+            f"the program wrote unexpected files into a toy output directory: "
+            f"{sorted(produced - expected)}")
