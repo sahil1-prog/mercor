@@ -1,0 +1,7 @@
+# Nothing in the authoring tree, tests, or solution may reach the solver image.
+authoring/
+tests/
+solution/
+.git/
+__pycache__/
+*.pyc

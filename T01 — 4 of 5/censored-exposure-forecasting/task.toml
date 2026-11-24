@@ -1,0 +1,65 @@
+name = "owe/population-pk-autoinduction-forecast"
+artifacts = ["/app/submission"]
+
+[metadata]
+author_name = "OpenWorldEngineer"
+difficulty = "hard"
+category = "Scientific Computing and Domain Science"
+subcategory = "Statistical modeling"
+task_objective = ["Implement", "Optimize"]
+artifact_type = ["Single script or program", "Mathematical or scientific model"]
+tags = [
+  "population-pharmacokinetics",
+  "nonlinear-mixed-effects",
+  "censored-likelihood",
+  "below-lloq",
+  "autoinduction",
+  "steady-state-exposure",
+  "map-estimation",
+  "oral-one-compartment",
+]
+expert_time_estimate_hours = 10.0
+difficulty_explanation = "The induction signal lives in censored troughs during sparse sampling; dropping BLQ samples or assuming time-invariant clearance biases every day-14 exposure forecast."
+
+# The graded reward is binary (the pipeline finale writes reward.txt from the suite's exit
+# status): a submission scores 1 only when EVERY check passes, including the stated pass bar
+# reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on the sealed held-out cohort (seed fixed in
+# tests/.truth/heldout.py). Measured here: the provided naive baseline scores reward 0.0
+# (raw 0.621, AUC/Cmax/Ctrough median relative errors 0.278/0.150/2.184), below the bar -> 0;
+# the reference in solution/ - censored-likelihood population priors fitted on /app/data/rich
+# plus induction-aware MAP individualization - scores 0.728 (raw 0.136) at the default
+# window, 0.733 / 0.832 / 0.728 at the graded 0.25 / 6.05 / 24.05 h windows, and 0.647 in
+# population mode, passing all 23 checks -> 1.
+# floor / nop = 0, baseline = 0 (the naive predictor is below the bar), reference = oracle = 1.
+[metadata.scoring]
+floor = 0.0
+baseline = 0.0
+reference = 1.0
+ceiling = 1.0
+regrade_tolerance = 0.0
+oracle = 1.0
+
+[agent]
+user = 1000  # pipeline: Dockerfile USER
+timeout_sec = 14400
+
+[verifier]
+user = "root"
+environment_mode = "separate"
+# The suite rebuilds the 150-subject held-out cohort with truth at four forecast windows
+# (~50 s) and then runs the submission ~30 times: six full-cohort re-runs (2 at the default
+# window, 3 at non-default windows, 1 in population mode) plus ~24 runs on 3-subject toy
+# cohorts (~1 s each for a MAP fit). Each full-cohort run is graded against BUDGET_S = 180 s
+# (the stated 120 s contract plus a host-load grace); worst case 6*180 = 1080 s of predictor
+# time, which with setup and a 2x margin needs ~2200 s. 3000 s (the 3600 s cap allows it)
+# leaves headroom without a slow-but-legitimate submission timing out the verifier itself.
+timeout_sec = 3000
+
+[environment]
+build_timeout_sec = 2400
+cpus = 4
+memory_mb = 8192
+storage_mb = 20480
+gpus = 0
+network_mode = "no-network"
+workdir = "/app"
