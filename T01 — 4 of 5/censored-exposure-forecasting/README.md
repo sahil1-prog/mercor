@@ -129,7 +129,7 @@ The final evaluation grade is binary: 1 when all 25 checks pass (including accur
 * **Median, not mean.** Taking medians prevents outlier subjects with atypical parameter draws from distorting the score, measuring accuracy across typical subjects as required for clinical dose selection.
 * **Normaliser 0.5.** A 50% median relative error (`raw = 0.5`) maps directly to reward 0. Measured non-PK shortcuts fall at or beyond this boundary: the multivariable regression shortcut scores 0.514 and the naive baseline scores 1.768. Only predictors with a viable PK model achieve positive reward.
 * **Pass bar `reward >= 0.50` (`raw <= 0.25`).** This boundary cleanly separates two classes of predictors:
-  - Individualized models with autoinduction pass at 24 h: raw 0.120 using true parameters, 0.109 for the reference solution, and 0.181 for time-only induction. At 47.95 h, the reference solution maintains raw 0.166, while time-only induction nears the passing boundary (reward 0.511).
+  - Individualized models with autoinduction pass at 24 h: raw 0.120 using true parameters, 0.109 for the reference solution, and 0.181 for time-only induction. At 47.95 h, the reference solution maintains raw 0.166, while time-only induction nears the passing boundary (reward 0.511). An independently written PKPy2 comparator (see Measured results) scores raw 0.122 at 24 h and 0.172 at 47.95 h, so the bar is reachable by a structurally different correct model, not only by the reference.
   - Predictors lacking individualization fail even with exact population parameters (raw 0.256), as do models omitting induction entirely (raw 1.444).
   The threshold ensures models fit appropriate subject-level dynamics without demanding precision beyond what sparse data can support.
 * **Graded windows 1.05 / 6.05 / 24.05 / 47.95 h.** The 1.05 h window evaluates uptake just past the absorption delay. The 0.05 h offsets place window boundaries off whole integration intervals. The 47.95 h window extends nearly a full day into washout beyond the next scheduled dose, revealing discrepancies in clearance dynamics. The reference solution scores 0.806 / 0.872 / 0.782 / 0.667 on these windows.
@@ -148,7 +148,7 @@ All runs executed under `--network none --cpus 4 --memory 8g`, using the agent i
 | naive baseline (`/app/baseline/predict.py`) | 0 | 12/23 on the previous suite; fails the accuracy bar (raw 1.768 at 24 h) |
 | constant output | 0 | 11/23 on the previous suite; one value copied to every subject, fails the accuracy bar |
 | dose-and-covariate regression shortcut | 0 | 13/23 on the previous suite; fails the accuracy bar at raw 0.514 (it scored reward 0.499 before this revision) |
-| tamper probe: the reference predictor, plus a write into `/app/submission` only when `--horizon-h` is given | 0 | current suite: 22/25, fails `test_r5_input_directory_and_submission_left_untouched`, `test_horizon_accuracy_matches_truth` and `test_zz_r5_nothing_modified_after_all_runs`. The previous 23-check suite scored the same probe 1 (23/23), which is why the check was extended. |
+| tamper probe: the reference predictor, plus a write into `/app/submission` only when `--horizon-h` is given | 0 | current suite: 22/25, fails `test_preservation_input_directory_and_submission_untouched`, `test_horizon_accuracy_matches_truth` and `test_zz_preservation_nothing_modified_after_all_runs`. The previous 23-check suite scored the same probe 1 (23/23), which is why the check was extended. |
 
 Reference continuous rewards on the held-out cohort, scored in the verifier image:
 
@@ -163,6 +163,27 @@ Reference continuous rewards on the held-out cohort, scored in the verifier imag
 
 Runtime: `solve.sh` takes roughly 22 s, and full-cohort prediction takes 3.6 s against the 120 s budget.
 
+### Independent comparator (bounds calibration)
+
+To check that the bar is reachable without the reference code, a second predictor was written separately and scored with the real verifier. It is structurally different from `solution/`:
+- the population fit is a joint Laplace NLME estimate (all parameters, IIV and residual error together) made with PKPy2 (github.com/Gumgo91/PKPy2, MIT), using M3 censoring and a numba ODE right-hand side;
+- the fit used the visible rich and sparse cohorts, starting from generic values (KA 1, V 250, CL0 20, EMAX 5, EC50 20, KENZ 0.01). It converged at OFV 5749.56 after 3013 s;
+- individual estimates are PKPy2's Laplace modes, and exposures come from scipy LSODA with an AUC state.
+
+PKPy2 was used only to author the comparator. It is not shipped in either image, and the comparator is not part of the package. The fit recovered KA 1.146 /h, V 321 L, CL0 16.1 L/h and an enzyme half-life of 92 h (generating values: 1.1, 300, 15, 96 h).
+
+| Window | raw | reward | median rel. error AUC / Cmax / Ctrough |
+|---|---|---|---|
+| 24 h (default) | 0.122 | 0.757 | 0.084 / 0.065 / 0.301 |
+| 1.05 h | 0.106 | 0.787 | 0.119 / 0.094 / 0.094 |
+| 6.05 h | 0.066 | 0.868 | 0.059 / 0.065 / 0.084 |
+| 24.05 h | 0.122 | 0.756 | 0.084 / 0.065 / 0.301 |
+| 47.95 h | 0.172 | 0.656 | 0.094 / 0.065 / 0.528 |
+
+Full-cohort prediction takes about 35 s, inside the 120 s budget.
+
+On the first full verifier run the comparator passed 24/25 checks (1281 s suite). It failed `test_covariates_unusable_sex_falls_back` because it stripped whitespace from `sex` and so read `" F "` as female. The instruction said only "not `M`/`F`", so it now says explicitly that `f`, `m` and `" F "` are invalid. After the comparator was fixed to compare `sex` literally, all 7 covariate checks passed. The comparator was not re-run through the full 25-check suite after that fix.
+
 ## Verification
 
 * The verifier synthesizes the 150-subject held-out cohort within its container via `tests/.truth/heldout.py` using a fixed seed; this cohort is never present in the solver image. Ground-truth values are integrated across a 0.02 h node grid with exact node placement at every dose event and window boundary.
@@ -175,25 +196,42 @@ Runtime: `solve.sh` takes roughly 22 s, and full-cohort prediction takes 3.6 s a
   - after the default runs (`test_inputs_unmodified`, `test_deterministic`);
   - after every held-out `--horizon-h` / `--estimator` run (`test_horizon_accuracy_matches_truth`);
   - before and after every toy run (`_run_toy`);
-  - in a dedicated criterion, `test_r5_input_directory_and_submission_left_untouched`. It runs the predictor on fresh read-only inputs in every invocation shape: default, horizons 6.05 and 47.95 h, both estimators, and two invalid calls. After each run it checks the inputs, the output directory and `/app/submission`;
-  - once more after the whole suite (`test_zz_r5_nothing_modified_after_all_runs`).
+  - in a dedicated criterion, `test_preservation_input_directory_and_submission_untouched`. It runs the predictor on fresh read-only inputs in every invocation shape: default, horizons 6.05 and 47.95 h, both estimators, and two invalid calls. After each run it checks the inputs, the output directory and `/app/submission`;
+  - once more after the whole suite (`test_zz_preservation_nothing_modified_after_all_runs`).
 * **What fails.** An added, removed or changed file, a symlink, or any extra file in an output directory fails its check.
 * **Measured.** A predictor that tampered only under `--horizon-h` passed the previous suite and scores 0 on this one (table above).
 
 | Instruction constraint | Criterion that enforces it | On violation |
 |---|---|---|
-| Leave the input directory unchanged | input SHA-256 + listing re-checked by `test_r5_input_directory_and_submission_left_untouched`, `test_inputs_unmodified` and `test_zz_r5_nothing_modified_after_all_runs`; toy inputs also before and after every toy run | check fails, reward 0 (floor) |
-| Leave `/app/submission` unchanged (bytecode caches excepted) | whole-tree fingerprint vs. suite start, after every run in `test_r5_input_directory_and_submission_left_untouched`, plus `test_inputs_unmodified` and the final sweep | check fails, reward 0 (floor) |
+| Leave the input directory unchanged | input SHA-256 + listing re-checked by `test_preservation_input_directory_and_submission_untouched`, `test_inputs_unmodified` and `test_zz_preservation_nothing_modified_after_all_runs`; toy inputs also before and after every toy run | check fails, reward 0 (floor) |
+| Leave `/app/submission` unchanged (bytecode caches excepted) | whole-tree fingerprint vs. suite start, after every run in `test_preservation_input_directory_and_submission_untouched`, plus `test_inputs_unmodified` and the final sweep | check fails, reward 0 (floor) |
 | Write OUT.csv and no other file into the output directory | output directory listed after every run; only the requested OUT.csv names may exist; rejected calls must write nothing | check fails, reward 0 (floor) |
 
-**Infrastructure failure.** `tests/test.sh` writes reward 0 before execution begins, updating it only upon a clean pytest exit. It fails closed, retaining reward 0 and emitting messages to stderr, if:
-- the reward directory cannot be locked;
-- the agent user is absent or root;
-- `setpriv` fails to drop privileges;
-- agent processes cannot be terminated;
-- `/app/submission/predict.py` is missing.
+**Infrastructure failure errors instead of scoring.** `tests/test.sh` writes no reward before grading completes. It only clears any stale or planted reward file from the locked reward directory. A reward is written only when pytest actually completes:
+- exit 0 (every check passed) writes 1;
+- exit 1 (a check failed, which is the submission's fault) writes 0;
+- a missing `/app/submission/predict.py` also writes 0, because that is an agent that did nothing.
 
-Submissions that crash, exceed runtime limits (180 s per-run ceiling), or are terminated by the host fail test assertions and score 0. Verifier-level timeouts (3000 s allocation; suite executes in 132-134 s) leave the default 0 reward intact. Infrastructure faults never yield a passing score and should be rerun rather than evaluated.
+Everything else is an infrastructure error. The script removes any reward file and exits non-zero, so the trial is recorded as an error, not a 0. This covers:
+- the reward directory or `/tests` cannot be locked;
+- the agent user is missing or is root;
+- `setpriv` cannot drop privileges;
+- agent processes cannot be stopped;
+- pytest exits 2, 3, 4 or 5 (interrupted, internal error, usage error, nothing collected);
+- the verifier is killed or times out (3000 s allocation; the suite takes 132-184 s). No reward file exists until grading finishes, so a timeout leaves none.
+
+Measured in Docker:
+
+| Case | Exit | reward.txt |
+|---|---|---|
+| oracle | 0 | 1 (25/25) |
+| nop | 1 | 0 |
+| tamper probe | 1 | 0 |
+| pytest collection failure, with a planted `reward.txt = 1` | 3 | none (planted file removed) |
+| `timeout -s KILL` | 137 | none |
+| `timeout -s TERM` | 124 | none |
+
+A predictor that crashes or exceeds its per-run limit (180 s) inside a completed suite fails a check and scores 0. That is the submission's fault, not an infrastructure fault.
 
 **Regrade tolerance (0.0).** Measured characteristics:
 - The evaluation cohort and ground-truth values derive deterministically from a fixed seed.
@@ -211,7 +249,7 @@ Given deterministic evaluation and binary scoring, observed variance is 0.0, est
 | Finishes within the runtime budget | `test_runtime_budget` |
 | Accuracy on the held-out cohort (reward >= 0.50) | `test_accuracy_pass_bar` |
 | Two runs agree | `test_deterministic`, `test_optional_modes_are_deterministic` |
-| Writes only OUT.csv; inputs and submission untouched (every run, every mode) | `test_r5_input_directory_and_submission_left_untouched` (the criterion), `test_inputs_unmodified`, `test_deterministic`, `test_horizon_accuracy_matches_truth`, `test_zz_r5_nothing_modified_after_all_runs`, plus the toy-run guards in every covariate/horizon/estimator check |
+| Writes only OUT.csv; inputs and submission untouched (every run, every mode) | `test_preservation_input_directory_and_submission_untouched` (the criterion), `test_inputs_unmodified`, `test_deterministic`, `test_horizon_accuracy_matches_truth`, `test_zz_preservation_nothing_modified_after_all_runs`, plus the toy-run guards in every covariate/horizon/estimator check |
 | Covariate fallbacks (70 kg, 45 years, M), per field, others unchanged | `test_covariates_missing_row_falls_back`, `test_covariates_unusable_weight_falls_back`, `test_covariates_unusable_sex_falls_back`, `test_covariates_unusable_age_falls_back`, `test_covariates_fallback_matches_default_row`, `test_covariates_fallback_leaves_others_unchanged` |
 | `--horizon-h`: default = 24, exact window, graded accuracy, invalid values rejected | `test_horizon_default_matches_explicit_24`, `test_horizon_accuracy_matches_truth`, `test_horizon_window_additivity`, `test_horizon_rejects_invalid_values` |
 | `--estimator`: default = map, population ignores samples and ids, responds to dose and weight, differs from map, invalid values rejected | `test_estimator_default_matches_explicit_map`, `test_estimator_population_ignores_samples`, `test_estimator_population_ignores_subject_id`, `test_estimator_population_responds_to_dosing_and_covariates`, `test_estimator_population_differs_from_map`, `test_estimator_rejects_invalid_values` |
@@ -220,7 +258,9 @@ Given deterministic evaluation and binary scoring, observed variance is 0.0, est
 
 In the previous release, a 15-line linear regression of dose and covariates scored reward 0.499 against the 0.50 threshold, and the memo provided exact population parameters. This revision strengthens evaluation rigor while preserving the scoring formula and pass criteria:
 
-* **Do-not-modify enforcement:** the input and submission-tree hash checks now run after every held-out run in every mode, in a dedicated R5 criterion that exercises every invocation shape, and in a final sweep (25 checks, was 23). A flag-gated tamper probe that passed the old suite now scores 0.
+* **Do-not-modify enforcement:** the input and submission-tree hash checks now run after every held-out run in every mode, in a dedicated preservation criterion (`test_preservation_input_directory_and_submission_untouched`) that exercises every invocation shape, and in a final sweep (25 checks, was 23). The criteria are indexed at the top of `tests/test_outputs.py` with their floor consequence. A flag-gated tamper probe that passed the old suite now scores 0.
+* **Infrastructure failures error instead of scoring:** `tests/test.sh` no longer pre-writes reward 0. A reward is written only when pytest completes (exit 0 writes 1, exit 1 writes 0). Lock, privilege-drop or process-sweep failures, pytest exits 2-5, signals and verifier timeouts exit non-zero with no reward file.
+* **Bounds calibrated on an independent implementation:** a PKPy2-based comparator passes the accuracy bar at every graded window (rewards 0.656 to 0.868; see Measured results). Its one failure, reading a padded `" F "` as female, showed that the instruction's `sex` rule was ambiguous, so the instruction now states that `f`, `m` and `" F "` are invalid.
 * **Truth model:** concentration-driven enzyme-turnover autoinduction (replacing a static Hill model), absorption lag, age scaling on CL0, wider parameter variance, LLOQ raised from 1.00 to 2.50 ng/mL, and intra-study dose titration (2x increase from Day 8 for ~70% of subjects).
 * **Sparse design:** sampling on Days 1, 4, and 7 (previously 1, 7, and 11), strictly preceding dose titration.
 * **Data:** visible cohorts regenerated; `rich/targets.csv` deleted.

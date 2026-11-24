@@ -9,8 +9,23 @@ Instruction requirement map (material requirement -> corresponding test):
   R4  Evaluated reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on held-out
       cohort ................................................................... test_accuracy_pass_bar
   R5  Outputs agree across deterministic repeated runs ......................... test_deterministic
-  R6  "must write only OUT.csv": input directory remains unmodified, no extra
-      files created, submission directory untouched ............................ test_inputs_unmodified
+  R6  PRESERVATION CONSTRAINT - instruction: "must write OUT.csv and no other file into
+      the output directory, and must leave the input directory and /app/submission
+      unchanged (Python bytecode caches excepted)". Staged criteria, each a hard gate:
+        (a) every invocation shape (default, --horizon-h 6.05 / 47.95, --estimator
+            map / population, combined, two invalid calls) on fresh read-only inputs,
+            checked after EACH run: inputs byte-identical (SHA-256) + listing unchanged,
+            output dir holds only the requested OUT.csv, /app/submission tree identical
+            to its state at suite start ......... test_preservation_input_directory_and_submission_untouched
+        (b) held-out inputs + submission tree after the two default runs ..... test_inputs_unmodified,
+                                                                                 test_deterministic
+        (c) after every held-out --horizon-h / --estimator run ......... test_horizon_accuracy_matches_truth
+        (d) toy inputs + output dir before/after every toy run ......... _run_toy (all test_covariates_*,
+                                                                                 test_horizon_*, test_estimator_*)
+        (e) final sweep after all runs ............................... test_zz_preservation_nothing_modified_after_all_runs
+      Consequence: any violation fails its check, and the pipeline reward is binary
+      (all checks pass -> 1, else 0), so a submission that modifies an input or its own
+      tree is gated to the floor, 0.
   R7  Incomplete covariates (missing row or unusable weight, age, sex) fall
       back per field to 70 kg, 45 years, and M without side-effects ............ test_covariates_*
   R8  --horizon-h H recomputes exposure over [t14, t14+H), validated against
@@ -398,7 +413,7 @@ def test_inputs_unmodified():
 
 
 #: Every invocation shape the contract defines, plus two it must reject.
-_R5_INVOCATIONS = (
+_PRESERVATION_INVOCATIONS = (
     ("default", []),
     ("h6", ["--horizon-h", "6.05"]),
     ("h48", ["--horizon-h", "47.95"]),
@@ -410,7 +425,7 @@ _R5_INVOCATIONS = (
 )
 
 
-def test_r5_input_directory_and_submission_left_untouched():
+def test_preservation_input_directory_and_submission_untouched():
     """Criterion for the instruction's requirement "write OUT.csv and no other file into the
     output directory, and leave the input directory and /app/submission unchanged (Python
     bytecode caches excepted)".
@@ -425,19 +440,19 @@ def test_r5_input_directory_and_submission_left_untouched():
     modifies its inputs or its own tree is gated to the floor (0).
     """
     d, o = _cov_toy("r5", _complete_rows())
-    for tag, args in _R5_INVOCATIONS:
+    for tag, args in _PRESERVATION_INVOCATIONS:
         got, proc = _run_toy(d, o, "r5-" + tag, args)    # re-hashes inputs + output dir
         out_path = os.path.join(o, "out-r5-" + tag + ".csv")
         if tag.startswith("bad"):
             assert proc.returncode != 0 and not os.path.lexists(out_path), (
-                f"R5: rejected call {args} must exit non-zero and write nothing")
+                f"preservation: rejected call {args} must exit non-zero and write nothing")
         else:
-            assert got is not None, f"R5: run {args} failed\n{proc.stderr[-1500:]}"
+            assert got is not None, f"preservation: run {args} failed\n{proc.stderr[-1500:]}"
         now_sub = _tree_digest(SUBMISSION)
         changed = sorted(k for k in set(now_sub) | set(_SUB_SNAPSHOT)
                          if now_sub.get(k) != _SUB_SNAPSHOT.get(k))
         assert not changed, (
-            f"R5: the run {args or ['(default)']} changed /app/submission "
+            f"preservation: the run {args or ['(default)']} changed /app/submission "
             f"(only OUT.csv may be written): {changed[:5]}")
     _assert_inputs_untouched()
 
@@ -1100,8 +1115,8 @@ def test_estimator_rejects_invalid_values():
         f"the program wrote unexpected files: {produced}")
 
 
-# ---- R6, final sweep --------------------------------------------------------------------------
-def test_zz_r5_nothing_modified_after_all_runs():
+# ---- R6 preservation, final sweep --------------------------------------------------------------------------
+def test_zz_preservation_nothing_modified_after_all_runs():
     """Runs last (file order): after every default, --horizon-h, --estimator and toy run the
     held-out inputs, every toy input directory, every output directory and the whole
     /app/submission tree must still be exactly as the suite left them. A predictor that edits

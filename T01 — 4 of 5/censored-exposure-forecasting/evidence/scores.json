@@ -62,7 +62,7 @@
     {
       "kind": "probe",
       "reward": 0.0,
-      "receipt": "current 25-check suite: 22 passed, 3 failed (test_r5_input_directory_and_submission_left_untouched, test_horizon_accuracy_matches_truth, test_zz_r5_nothing_modified_after_all_runs), reward 0; previous 23-check suite: 23 passed, reward 1",
+      "receipt": "current 25-check suite: 22 passed, 3 failed (test_preservation_input_directory_and_submission_untouched, test_horizon_accuracy_matches_truth, test_zz_preservation_nothing_modified_after_all_runs), reward 0; previous 23-check suite: 23 passed, reward 1",
       "note": "tamper probe: the reference predictor plus a write into /app/submission only when --horizon-h is given. Passed the previous suite, scores 0 on the current one.",
       "who": "OpenWorldEngineer",
       "agent": "OpenWorldEngineer (human expert author), AI-assisted",
@@ -74,12 +74,51 @@
       "kind": "reference",
       "reward": 1.0,
       "receipt": "pytest 25/25 passed in 183.69s (current 25-check suite)",
-      "note": "grade 4 with the dedicated R5 criterion test_r5_input_directory_and_submission_left_untouched",
+      "note": "grade 4 with the dedicated R5 criterion test_preservation_input_directory_and_submission_untouched",
       "who": "OpenWorldEngineer",
       "agent": "OpenWorldEngineer (human expert author), AI-assisted",
       "when": "2026-11-24",
       "date": "2026-11-24",
       "budget": "local Docker, --network none --cpus 4 --memory 8g"
+    },
+    {
+      "kind": "probe",
+      "reward": null,
+      "receipt": "infra paths: pytest collection failure with planted reward.txt=1 -> exit 3, no reward file; timeout -s KILL -> exit 137, no reward; timeout -s TERM -> exit 124, no reward; oracle -> exit 0 reward 1 (25/25); nop -> exit 1 reward 0; tamper -> exit 1 reward 0",
+      "note": "test.sh no longer pre-writes reward 0: infrastructure failures (lock, setpriv, process sweep, pytest exit 2-5, signals, verifier timeout) exit non-zero with no reward file",
+      "who": "OpenWorldEngineer",
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g"
+    },
+    {
+      "kind": "comparator",
+      "reward": 0,
+      "receipt": "independent PKPy2 (MIT) comparator, verifier image + PKPy2, full suite: 24/25 passed in 1280.80 s; failed test_covariates_unusable_sex_falls_back (stripped whitespace, read ' F ' as F). After a literal M/F fix: 7/7 covariate checks passed (full suite not re-run).",
+      "continuous": {
+        "24": {
+          "raw": 0.122,
+          "reward": 0.757
+        },
+        "1.05": {
+          "raw": 0.106,
+          "reward": 0.787
+        },
+        "6.05": {
+          "raw": 0.066,
+          "reward": 0.868
+        },
+        "24.05": {
+          "raw": 0.122,
+          "reward": 0.756
+        },
+        "47.95": {
+          "raw": 0.172,
+          "reward": 0.656
+        }
+      },
+      "note": "bounds calibration on a structurally different implementation: joint Laplace NLME fit (M3 censoring) from generic starts, OFV 5749.56, 3013 s; Laplace modes; LSODA exposures. Authoring only, not shipped. Instruction sex rule made explicit as a result."
     }
   ],
   "nop": [
@@ -91,10 +130,11 @@
     "held-out cohort regenerated inside the verifier from tests/.truth (root-only), never present in the agent image",
     "no held-out sample falls inside the day-14 window (assert_no_day14_samples), and all held-out samples precede the day-8 titration step",
     "output read with O_NOFOLLOW + realpath containment; inputs root-owned; only the out/ directory is agent-writable",
-    "R5 (inputs and /app/submission unchanged, only OUT.csv written) is a named criterion, test_r5_input_directory_and_submission_left_untouched, exercising every invocation shape; also re-checked after the default runs, after every held-out --horizon-h/--estimator run, around every toy run and in a final sweep; a flag-gated tamper probe scores 0",
+    "R5 (inputs and /app/submission unchanged, only OUT.csv written) is a named criterion, test_preservation_input_directory_and_submission_untouched, exercising every invocation shape; also re-checked after the default runs, after every held-out --horizon-h/--estimator run, around every toy run and in a final sweep; a flag-gated tamper probe scores 0",
     "covariate fallbacks graded on several distinct fixtures (missing row, blank/junk weight, blank/junk/zero age, blank/unknown/lowercase sex)",
     "horizon graded against truth at 1.05 / 6.05 / 24.05 / 47.95 h plus an additivity identity, so rounding or scaling the window fails",
     "population mode graded by sample- and id-invariance with a map-mode control, so ignoring the option fails",
-    "visible-data generator and seeds kept outside the package"
+    "visible-data generator and seeds kept outside the package",
+    "infrastructure failures never score: no reward is written until pytest completes; any stale or planted reward file is removed first"
   ]
 }

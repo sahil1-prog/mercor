@@ -23,19 +23,19 @@ write_reward() {
         return 0
     fi
     rm -f "$tmp"
-    [ "${2:-}" = again ] || write_reward 0 again
-    return 1
+    return 1    # caller turns this into an infrastructure error (no reward), never a 0
 }
 
+# Infrastructure failure (anything outside the agent's control: lock, privilege drop, process
+# sweep, pytest crash/interrupt/collection error, signals). It must NOT score: remove any reward
+# file and exit non-zero, so the trial is recorded as an infrastructure error, not a 0.
 fail_closed() {
     trap - EXIT
     set +e
-    echo "verifier: $1" >&2
-    if ! write_reward 0 && [ "$LOCKED" = 1 ]; then
-        rm -rf "$REWARD_DIR/reward.json" "$REWARD_FILE"
-    fi
+    echo "verifier: infrastructure error: $1" >&2
+    rm -rf "$REWARD_DIR/reward.json" "$REWARD_FILE" 2>/dev/null
     [ "$LOCKED" = 0 ] || chmod 0755 "$REWARD_DIR"
-    exit 1
+    exit 3
 }
 
 agent_gid() {
@@ -83,15 +83,24 @@ stop_agent() {
     [ -z "$(agent_pids)" ]
 }
 
+# Reward only from a COMPLETED grading run: pytest exit 0 (all checks passed) -> 1, exit 1
+# (a check failed, i.e. the submission's fault - including a missing entrypoint) -> 0.
+# Any other code (2 interrupted, 3 internal error, 4 usage error, 5 nothing collected, 128+N
+# killed by a signal) means grading did not complete -> infrastructure error, no reward.
 verifier_finale() {
-    local rc=$? final=0
+    local rc=$? code final
     trap - EXIT
     set +e
+    code=${status:-$rc}
     stop_agent || fail_closed 'cannot stop agent-user processes'
-    [ "${status:-$rc}" = 0 ] && final=1
+    case "$code" in
+        0) final=1 ;;
+        1) final=0 ;;
+        *) fail_closed "grading did not complete (exit status $code)" ;;
+    esac
     write_reward "$final" || fail_closed 'cannot finalize reward'
     [ "$ISOLATE" = 0 ] || chmod 0755 "$REWARD_DIR"
-    exit "${status:-$rc}"
+    exit "$code"
 }
 
 if [ "$ISOLATE" = 1 ]; then
@@ -131,11 +140,14 @@ stop_agent"
 readonly -f write_reward fail_closed agent_gid is_agent agent_pids stop_agent verifier_finale
 readonly VERIFIER_UID VERIFIER_GID ISOLATE AGENT_GID AS_AGENT AGENT_SWEEP INIT_IS_AGENT LOCKED
 trap verifier_finale EXIT
-write_reward 0 || fail_closed 'cannot initialize reward'
+# No reward is written before grading completes (a verifier timeout or crash must leave no
+# reward behind); only clear any stale or planted reward file from the locked directory.
+rm -rf "$REWARD_DIR/reward.json" "$REWARD_FILE" && [ ! -e "$REWARD_FILE" ] \
+    || fail_closed 'cannot clear a stale reward file'
 # <<< verifier prelude <<<
 
 # Prerequisite: the agent must have produced the documented entrypoint. A missing
-# one is the agent doing nothing, so it names the path and fails closed (reward 0).
+# one is the agent doing nothing (its own fault), so it names the path and scores 0.
 if [ ! -f /app/submission/predict.py ]; then
     echo "verifier: missing /app/submission/predict.py" >&2
     exit 1

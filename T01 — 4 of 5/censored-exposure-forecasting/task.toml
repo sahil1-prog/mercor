@@ -35,9 +35,9 @@ difficulty_explanation = "Clearance increases dynamically through drug-induced e
 # Measured floor: nop, the naive baseline (raw 1.768), a constant output and a
 # dose-and-covariate regression shortcut (raw 0.514) all score 0. See README.md.
 # Constraint gates (any failure -> floor 0): "leave the input directory and /app/submission
-# unchanged, write only OUT.csv" is the criterion test_r5_input_directory_and_submission_left_untouched
+# unchanged, write only OUT.csv" is the criterion test_preservation_input_directory_and_submission_untouched
 # (every invocation shape), re-checked by test_inputs_unmodified, after every held-out
-# horizon/estimator run, and by test_zz_r5_nothing_modified_after_all_runs.
+# horizon/estimator run, and by test_zz_preservation_nothing_modified_after_all_runs.
 [metadata.scoring]
 floor = 0.0
 baseline = 0.0
