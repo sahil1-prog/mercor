@@ -3,7 +3,6 @@
 Authoritative source of truth for the clinical study simulation. Calibrates both
 the training datasets and unseen evaluation cohort using independent seeds.
 Isolated within the verification image and excluded from candidate workspaces.
-"""
 
 Model (per subject i; WT in kg, AGE in years):
 
