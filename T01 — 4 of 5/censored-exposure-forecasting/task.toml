@@ -21,7 +21,7 @@ tags = [
   "dose-titration",
 ]
 expert_time_estimate_hours = 10.0
-difficulty_explanation = "Systemic clearance is dynamically induced via drug-stimulated enzyme turnover, with the majority of subjects doubling their dose following the sparse sampling window. Informative post-dose troughs fall largely below the assay quantification limit, requiring a censored-likelihood population PK model to extrapolate through dose escalation and terminal washout."
+difficulty_explanation = "Clearance increases dynamically through drug-induced enzyme turnover, and roughly 70% of subjects escalate to twice their dose after sparse sampling ends. Informative post-dose troughs are largely below assay quantification limits, requiring a population PK model with censored likelihood to extrapolate across dose titration and drug washout."
 
 # The graded reward is binary (the pipeline finale writes reward.txt from the suite's exit
 # status): a submission scores 1 only when EVERY check passes, including the stated pass bar
@@ -43,7 +43,8 @@ regrade_tolerance = 0.0
 oracle = 1.0
 
 [agent]
-user = 1000  # pipeline: Dockerfile USER
+# Named non-root account; created at uid 1000 in environment/Dockerfile and tests/Dockerfile.
+user = "agent"
 timeout_sec = 14400
 # No web search or downloads while the agent works; everything it needs ships in the image.
 network_mode = "no-network"

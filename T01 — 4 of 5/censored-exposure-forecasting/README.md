@@ -11,29 +11,29 @@ Reviewer-facing summary. The agent never sees this file.
 
 ## The task
 
-A clinical pharmacology group requires Day 14 exposure projections (AUC, Cmax, and Ctrough evaluated across `[t14, t14+H)`) for an incoming cohort in a once-daily multiple-ascending-dose protocol. The test compound stimulates its own elimination clearance, and approximately 70% of subjects escalate to twice their initial dose starting on Day 8. The incoming cohort undergoes bioanalytical sampling exclusively on Days 1, 4, and 7 — all occurring prior to the Day 8 titration step — meaning the Day 14 forecast constitutes an extrapolation governed entirely by the mathematical model rather than direct empirical observations.
+A clinical pharmacology working group needs day-14 steady-state exposure forecasts (AUC, Cmax, Ctrough over `[t14, t14+H)`) for an incoming cohort from a once-daily multiple-ascending-dose trial. The drug induces its own clearance, and approximately 70% of participants step up to twice their initial dose starting on day 8. However, the incoming cohort is only sampled on days 1, 4, and 7 — all on the starting dose before the titration step — so the day-14 forecast is an extrapolation the model must compute rather than something visible in the data.
 
-**Deliverable:** `/app/submission/predict.py`, executed via:
+**Deliverable:** `/app/submission/predict.py`, invoked as:
 `python3 /app/submission/predict.py --input-dir DIR --output OUT.csv [--horizon-h H] [--estimator E]`.
-It outputs `subject_id,auc_ss,cmax_ss,ctrough_ss` for all cohort participants. Any dependencies required during evaluation (such as a calibrated population model file) must reside within `/app/submission`; `/app/data`, `/app/baseline`, and `/app/analysis` will be removed during grading.
+It outputs `subject_id,auc_ss,cmax_ss,ctrough_ss` for each subject. Any dependencies needed at evaluation time (such as fitted population parameters) must be saved under `/app/submission`; `/app/data`, `/app/baseline`, and `/app/analysis` are removed during grading.
 
-**Agent-visible material:** a densely sampled cohort (`/app/data/rich`, 40 subjects with Day 1 and Day 14 profiles plus daily trough monitoring), a sparsely sampled cohort matching the target evaluation structure (`/app/data/sparse`, 60 subjects), a baseline naive predictor, and an internal analysis memo advocating incorrect assumptions (stationary clearance, linear dose scaling, omitting BLQ records).
+**Agent-visible material:** a densely sampled cohort (`/app/data/rich`, 40 subjects, day-1 and day-14 profiles plus daily trough samples), a sparse cohort matching the test schedule (`/app/data/sparse`, 60 subjects), a naive baseline script, and an interim memo whose conclusions are incorrect (time-invariant clearance, linear dose scaling, BLQ records discarded).
 
 ## What makes it hard
 
-The underlying generative model (`tests/.truth/truth_model.py`):
+The underlying data-generating model (`tests/.truth/truth_model.py`):
 
-* Oral absorption delayed by a lag period (typical value 0.4 h) entering a central compartment;
-* Apparent clearance defined as `CL0 * E(t)`, where enzyme turnover is stimulated by circulating drug concentrations: `dE/dt = kenz * (1 + Emax*C/(EC50+C)) - kenz*E`. Autoinduction kinetics consequently depend on dosing history and compliance — dose escalation drives further induction, while drug washout allows clearance to regress toward baseline;
-* Demographic covariates: allometric body weight on CL0 and V, power-law age scaling on CL0, and biological sex effects on CL0 and V;
-* Inter-individual variability (IIV) across all 7 parameters (30–40% CV on CL0, Emax, and EC50);
-* Analytical quantification limit of 2.50 ng/mL: 45% of rich cohort samples and 25% of sparse cohort samples are censored, concentrated primarily in the informative post-dose troughs that capture autoinduction.
+* Oral absorption with an absorption lag (0.4 h typical) into one compartment;
+* Apparent clearance `CL0 * E(t)`, where the enzyme pool follows turnover kinetics driven by drug concentration: `dE/dt = kenz * (1 + Emax*C/(EC50+C)) - kenz*E`. Autoinduction therefore depends on dosing and compliance — dose escalation drives further induction, and clearance regresses toward baseline during washout;
+* Covariates: allometric weight scaling on CL0 and V, power scaling of age on CL0, and sex effects on CL0 and V;
+* Inter-individual variability on all 7 parameters (30–40% on CL0, Emax, EC50);
+* Assay LLOQ of 2.50 ng/mL: 45% of rich cohort samples and 25% of sparse cohort samples are censored, predominantly the trough measurements that carry the induction signal.
 
-An effective solution must deduce this underlying kinetic behavior directly from data (contrasting the flawed memo), fit a population PK model under a censored likelihood, compute empirical-Bayes individual parameter estimates, and integrate forward through the titration step. Standard NLME platforms are unavailable; execution relies on base numpy, scipy, and pandas.
+A valid solution must uncover this pharmacokinetic structure from data (despite the misleading memo), calibrate a population model using a censored likelihood, compute empirical-Bayes MAP estimates for each subject, and integrate forward through the titration step. Standard NLME software is unavailable; code runs using standard numpy, scipy, and pandas.
 
 ### Measured with the true generating parameters (calibration, default 24 h window)
 
-To illustrate the sensitivity of modeling decisions, each row below evaluates a MAP estimator initialized with true population values except for the isolated structural deviation:
+To show how much each modeling choice affects accuracy, each row evaluates a MAP estimator with true population parameters except for the single noted difference:
 
 | Predictor | raw | reward | passes |
 |---|---|---|---|
@@ -42,24 +42,24 @@ To illustrate the sensitivity of modeling decisions, each row below evaluates a 
 | no induction | 1.444 | 0.000 | no |
 | population typical values only, no individual fit | 0.256 | 0.487 | no |
 
-A purely time-dependent induction formulation fails to track the dose titration step and post-dose washout. While it marginally meets criteria at 24 h, it drops close to failing on the extended 47.95 h window, where the concentration-driven formulation maintains a reward of 0.658.
+A time-only induction formulation cannot properly track the dose escalation or subsequent washout. While it barely passes the 24 h window, it falls close to failing on the 47.95 h window, where the concentration-driven model maintains 0.658.
 
 ## Scoring
 
-For every subject and parameter: `r = |pred - true| / true`;
+For each subject and metric: `r = |pred - true| / true`;
 `raw = 0.5*median(r_AUC) + 0.3*median(r_Cmax) + 0.2*median(r_Ctrough)`;
-`reward = clip(1 - raw/0.5, 0, 1)`. Submissions pass when `reward >= 0.50` (`raw <= 0.25`).
-The mathematical formula, weighing coefficients, and passing threshold remain fully preserved from the original specification.
+`reward = clip(1 - raw/0.5, 0, 1)`. A submission passes when `reward >= 0.50` (`raw <= 0.25`).
+The metric formula, weights, and pass threshold remain identical to the original specification.
 
-The automated evaluation pipeline assigns a binary reward: 1 only when all 23 verification tests pass, including passing accuracy thresholds at default and all evaluated horizons (1.05 h, 6.05 h, 24.05 h, 47.95 h), and 0 otherwise.
+The evaluation reward is binary: 1 only when all 23 verification checks pass, including the pass threshold at the default window and each graded window (1.05 h, 6.05 h, 24.05 h, 47.95 h), and 0 otherwise.
 
 ### Where 1.0 comes from
 
-1.0 is established via an explicit reference implementation: the solution within `solution/` (`solve.sh` calibrates `fit_population.py` against `/app/data`, then establishes `predict.py` + `pk_engine.py` + `pop_params.json`). It successfully passes all 23 grading checks. While the continuous reward is bounded by sparse data noise and censoring, the overall task grade is binary, yielding a final score of 1.0.
+1.0 is reached by the reference implementation in `solution/` (`solve.sh` calibrates `fit_population.py` on `/app/data`, then installs `predict.py` + `pk_engine.py` + `pop_params.json`). It passes all 23 checks. The continuous reward behind the pass is not 1.0 due to sparse sampling noise and assay censoring, but the final task score is binary, yielding 1.0.
 
 ## Measured results (local Docker, both images built from this package)
 
-Evaluations executed under `--network none --cpus 4 --memory 8g`, employing the solver image for task execution and the verifier image for grading, matching `task.toml` specifications.
+Tested using `--network none --cpus 4 --memory 8g`, running the solver image for solutions and the verifier image for grading, matching `task.toml`.
 
 | Run | Pipeline reward | Detail |
 |---|---|---|
@@ -81,13 +81,13 @@ Reference continuous rewards on the held-out cohort (scored in the verifier imag
 | 47.95 h | 0.166 | 0.667 | 0.089 / 0.057 / 0.524 |
 | 24 h, `--estimator population` (not graded for accuracy) | 0.246 | 0.508 | 0.178 / 0.118 / 0.610 |
 
-Runtime: `solve.sh` executes in ~22 s; a full-cohort prediction takes 3.6 s against the 120 s contract budget.
+Runtime: `solve.sh` runs in ~22 s; full-cohort prediction takes 3.6 s against the 120 s budget.
 
 ## Verification
 
-* The unseen held-out cohort (150 subjects) is constructed dynamically within the verifier from `tests/.truth/heldout.py` using a fixed random seed; it is never accessible in the solver container. Ground truth is generated across a 0.02 h integration grid with exact node placements at dose administrations and interval boundaries.
-* Input datasets never supply observations within the Day 14 window (`assert_no_day14_samples`).
-* The prediction process runs under the unprivileged agent uid against read-only root inputs; output files are verified with `O_NOFOLLOW`; directory contents and submission files are cryptographically hashed before and after evaluation.
+* The unseen cohort (150 subjects) is generated inside the verifier from `tests/.truth/heldout.py` using a fixed random seed; it is never accessible in the solver image. Ground truth is integrated on a 0.02 h node grid with exact nodes at each dose administration and window boundary.
+* Input datasets never contain observations within the day-14 window (`assert_no_day14_samples`).
+* The predictor runs as the agent uid against read-only root inputs; output files are read with `O_NOFOLLOW`; inputs and submission files are hashed before and after evaluation.
 
 ### Requirement-to-check map (`tests/test_outputs.py`, 23 checks)
 
@@ -105,29 +105,29 @@ Runtime: `solve.sh` executes in ~22 s; a full-cohort prediction takes 3.6 s agai
 
 ## Changes in this revision
 
-The prior task release allowed a quick heuristic workaround: a 15-line linear regression mapping dose and baseline covariates to Day 14 exposure achieved a reward of 0.499 against the 0.50 threshold, and the memo provided exact population parameters. This revision robustly hardens the benchmark while keeping the scoring formula and pass criteria invariant:
+The previous task version allowed an empirical workaround: a 15-line linear regression of dose and covariates reached reward 0.499 against the 0.50 bar, and the memo provided true typical parameters. This revision hardens the challenge while keeping the scoring formula and pass threshold invariant:
 
-* Generative truth model: incorporated concentration-driven enzyme-turnover kinetics (replacing a static Hill model), absorption lag time, age-dependent CL0 scaling, increased inter-individual variability, raised LLOQ from 1.00 to 2.50 ng/mL, and intra-study dose titration (2x increase from Day 8 for ~70% of subjects).
-* Sampling schedule: observations shifted to Days 1, 4, and 7 (previously 1, 7, and 11), strictly preceding titration.
-* Data regeneration: visible training sets reconstructed; `rich/targets.csv` deleted to prevent leakage.
-* Analysis memo: updated with authentic estimates derived from a naive non-compartmental model on the updated cohort.
-* Graded forecast windows: configured to 1.05, 6.05, 24.05, and 47.95 h (replacing 0.25, 6.05, 24.05 h, as 0.25 h fell entirely within the absorption lag).
-* `--estimator population`: verified for strict invariance properties rather than prediction accuracy, as expanded variability places fixed-effect accuracy near 0.508.
-* Fallback rules: explicit fallback handling for missing or unparseable `age_years` defaulting to 45 years.
-* Reference pipeline: updated and validated against the finalized autoinduction dynamics.
+* Truth model: concentration-dependent enzyme-turnover autoinduction (replacing a static Hill model), absorption lag time, age effect on CL0, wider between-subject variability, increased LLOQ from 1.00 to 2.50 ng/mL, and intra-study dose titration (doubling from day 8 for ~70% of subjects).
+* Sampling schedule: days 1, 4, and 7 (previously 1, 7, and 11), strictly before dose escalation.
+* Data regeneration: visible datasets regenerated; `rich/targets.csv` removed.
+* Memo updated: revised with realistic parameters from a naive fit on the updated cohort.
+* Graded forecast windows: set to 1.05, 6.05, 24.05, and 47.95 h (replacing 0.25, 6.05, 24.05 h, as 0.25 h fell entirely within the absorption lag).
+* `--estimator population`: tested for required sample-invariance properties rather than accuracy, as wider variance puts fixed-effect accuracy near 0.508.
+* Fallback rules: added explicit fallback for missing or unparseable `age_years` defaulting to 45 years.
+* Reference solution: updated and validated on the revised model.
 
-Because visible datasets, instructions, and verification logic were overhauled, prior benchmark evaluations are superseded.
+Because visible datasets, instructions, and verification logic changed, prior evaluation results are superseded.
 
 ## Studio runs
 
-No platform studio runs recorded on this version yet. Evaluation tracking: reference and empty run IDs (Claude Opus 4.6), writer and reviewer Astra (Codex) benchmarks against token thresholds (< 0.67 / 400k), and reviewer Opus 5.5 benchmark (< 0.75).
+No studio runs recorded on this version yet. Benchmark targets: reference and empty run IDs (Claude Opus 4.6), writer and reviewer Astra (Codex) runs against token budgets (< 0.67 / 400k), and reviewer Opus 5.5 run against the < 0.75 threshold.
 
 ## AI assistance
 
-Anthropic Claude assisted with revision authoring: refining truth model kinetics, running calibration tests, updating reference solution scripts, test harness implementation, and documentation. The author established task scope, clinical problem formulation, and evaluation privacy design.
+Anthropic Claude assisted with revision preparation: refining the truth model, running calibration benchmarks, updating reference solution scripts, test suite adjustments, and documentation. The author defined the clinical challenge, scoring design, and evaluation structure.
 
 ## Environment
 
 * Agent image: `python:3.13-slim-bookworm` (pinned digest), numpy 2.2.3, scipy 1.15.2, pandas 2.2.3; unprivileged uid 1000; no internet access.
-* Verifier image: identical base configuration with pytest 8.4.1 and pytest-json-ctrf 0.6.1; outputs structured CTRF reports to `/logs/verifier/ctrf.json`.
-* 4 CPUs, 8192 MB RAM, execution directory `/app`.
+* Verifier image: identical base configuration with pytest 8.4.1 and pytest-json-ctrf 0.6.1; writes CTRF reports to `/logs/verifier/ctrf.json`.
+* 4 CPUs, 8192 MB RAM, working directory `/app`.

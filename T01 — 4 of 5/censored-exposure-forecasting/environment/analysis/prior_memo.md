@@ -6,7 +6,7 @@
 
 ## Summary
 
-A pooled oral one-compartment pharmacokinetic model assuming first-order absorption and static systemic clearance was calibrated to Day 1 plasma concentration profiles from the rich cohort. Convergence was achieved cleanly, and we propose utilizing this dose-proportional, stationary model for projecting Day 14 exposures, including for cohorts stepping up to elevated dosing tiers on Day 8.
+A pooled oral one-compartment pharmacokinetic model with first-order absorption and constant clearance was fitted to Day 1 plasma profiles from the rich cohort. The estimation converged smoothly, and we recommend this time-invariant, dose-proportional model for predicting Day 14 exposure, including for subjects escalating to the higher dose level on Day 8.
 
 ## Parameter estimates (time-invariant model, day-1 data)
 
@@ -19,15 +19,15 @@ A pooled oral one-compartment pharmacokinetic model assuming first-order absorpt
 | IIV V     | 35%      | CV    |
 | Residual  | 39%      | CV (proportional, log scale) |
 
-A total of 405 of the 553 Day 1 sample records were analyzed; remaining observations were reported below the analytical assay LLOQ and excluded.
+A total of 405 of the 553 Day 1 sample records were utilized; remaining samples were reported below the assay LLOQ and excluded from analysis.
 
 ## Notes on the data
 
-- Measurements flagged with `censored=1` were **omitted** from model fitting. These represent trough and terminal-phase samples that were treated as non-informative.
-- Patient body weight, age, and biological sex were not evaluated as predictive covariates in this preliminary analysis.
-- The estimated residual error exceeds initial bioanalytical validation expectations; this dispersion is attributed to clinical site specimen-handling variability rather than structural misspecification.
-- Potential absorption lag times were not explored; concentration measurements at 0.25 h and 0.5 h were largely below quantification limits and discarded along with other censored points.
+- Samples marked `censored=1` were **omitted** from the fit. These represent trough and late-absorption draws deemed uninformative.
+- Body weight, age, and biological sex were not tested as covariates in this initial analysis.
+- Estimated residual variability exceeds assay validation expectations; we attribute this to clinical site sample handling rather than structural model error.
+- No evidence of absorption delay was evaluated; 0.25 h and 0.5 h samples were mostly below LLOQ and dropped with other censored points.
 
 ## Recommendation
 
-Propagate the parameter point estimates listed above across each subject's dosing records and integrate exposure through the Day 14 window. Because systemic exposure is modeled as strictly linear with dose, subjects titrated to twice their initial dose starting on Day 8 are projected to demonstrate a proportional two-fold exposure increase at Day 14. Introducing dynamic, time-varying clearance mechanisms is considered unnecessary.
+Apply the point estimates above across each subject's dosing rows and integrate through the Day 14 window. Exposure increases linearly with dose, so subjects stepping up to double their starting dose on Day 8 are expected to reach double their starting-dose exposure by Day 14. Adding time-dependent clearance terms is not recommended.
