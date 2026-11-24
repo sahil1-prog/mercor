@@ -397,6 +397,51 @@ def test_inputs_unmodified():
     _assert_inputs_untouched()
 
 
+#: Every invocation shape the contract defines, plus two it must reject.
+_R5_INVOCATIONS = (
+    ("default", []),
+    ("h6", ["--horizon-h", "6.05"]),
+    ("h48", ["--horizon-h", "47.95"]),
+    ("map", ["--estimator", "map"]),
+    ("pop", ["--estimator", "population"]),
+    ("pop48", ["--horizon-h", "47.95", "--estimator", "population"]),
+    ("bad-h", ["--horizon-h", "0"]),
+    ("bad-est", ["--estimator", "MAP"]),
+)
+
+
+def test_r5_input_directory_and_submission_left_untouched():
+    """Criterion for the instruction's requirement "write OUT.csv and no other file into the
+    output directory, and leave the input directory and /app/submission unchanged (Python
+    bytecode caches excepted)".
+
+    The predictor runs on fresh read-only inputs once per invocation shape (default, graded
+    horizons, both estimators, and two invalid calls). After EVERY run:
+      * each input file is byte-identical (SHA-256) and the input listing is unchanged;
+      * the output directory holds only the OUT.csv files the suite asked for - and a
+        rejected call has written nothing;
+      * the /app/submission tree is identical to its state when the suite started.
+    Any violation fails this check; the pipeline reward is binary, so a submission that
+    modifies its inputs or its own tree is gated to the floor (0).
+    """
+    d, o = _cov_toy("r5", _complete_rows())
+    for tag, args in _R5_INVOCATIONS:
+        got, proc = _run_toy(d, o, "r5-" + tag, args)    # re-hashes inputs + output dir
+        out_path = os.path.join(o, "out-r5-" + tag + ".csv")
+        if tag.startswith("bad"):
+            assert proc.returncode != 0 and not os.path.lexists(out_path), (
+                f"R5: rejected call {args} must exit non-zero and write nothing")
+        else:
+            assert got is not None, f"R5: run {args} failed\n{proc.stderr[-1500:]}"
+        now_sub = _tree_digest(SUBMISSION)
+        changed = sorted(k for k in set(now_sub) | set(_SUB_SNAPSHOT)
+                         if now_sub.get(k) != _SUB_SNAPSHOT.get(k))
+        assert not changed, (
+            f"R5: the run {args or ['(default)']} changed /app/submission "
+            f"(only OUT.csv may be written): {changed[:5]}")
+    _assert_inputs_untouched()
+
+
 # ---- Toy fixtures: root-owned read-only inputs + a separate agent-owned output dir -----------
 
 
@@ -1056,7 +1101,7 @@ def test_estimator_rejects_invalid_values():
 
 
 # ---- R6, final sweep --------------------------------------------------------------------------
-def test_zz_nothing_modified_after_all_runs():
+def test_zz_r5_nothing_modified_after_all_runs():
     """Runs last (file order): after every default, --horizon-h, --estimator and toy run the
     held-out inputs, every toy input directory, every output directory and the whole
     /app/submission tree must still be exactly as the suite left them. A predictor that edits

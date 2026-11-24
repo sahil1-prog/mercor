@@ -33,7 +33,7 @@ A successful submission is a standalone prediction pipeline rather than a static
 - exact `--horizon-h` window integration while rejecting invalid arguments;
 - a `population` estimator that ignores observed samples and subject IDs while responding to dose and covariates.
 
-The overall task score is binary: 1 when all 24 verification tests pass, 0 otherwise.
+The overall task score is binary: 1 when all 25 verification tests pass, 0 otherwise.
 
 Methodological choices remain unconstrained: candidates may employ any structural model, parameter estimation technique, or numerical solver. In practice, satisfying all criteria across every window requires three components:
 - a pharmacokinetic model whose clearance evolves with drug exposure, carrying forward through titration and washout;
@@ -63,7 +63,7 @@ Partial success, such as satisfying formatting checks without meeting accuracy t
 
 ### The 1.0 witness
 
-The reference implementation in `solution/` achieves a score of 1.0. Running `solve.sh` fits `fit_population.py` on `/app/data` and populates `/app/submission` with `predict.py`, `pk_engine.py`, and `pop_params.json`; this submission passes all 24 checks in local Docker runs of both container images. It provides an explicit proof of feasibility rather than a prescribed single approach. A continuous reward of 1.0 would require zero relative error across all metrics - unachievable under assay noise and censoring - but because task grading is binary, the passing witness receives 1.0.
+The reference implementation in `solution/` achieves a score of 1.0. Running `solve.sh` fits `fit_population.py` on `/app/data` and populates `/app/submission` with `predict.py`, `pk_engine.py`, and `pop_params.json`; this submission passes all 25 checks in local Docker runs of both container images. It provides an explicit proof of feasibility rather than a prescribed single approach. A continuous reward of 1.0 would require zero relative error across all metrics - unachievable under assay noise and censoring - but because task grading is binary, the passing witness receives 1.0.
 
 ## What makes it hard
 
@@ -121,7 +121,7 @@ For each subject and metric: `r = |pred - true| / true`.
 `reward = clip(1 - raw/0.5, 0, 1)`; a submission passes when `reward >= 0.50` (`raw <= 0.25`).
 The mathematical formula, weighing coefficients, and passing bar are preserved from the original task design and remain unchanged. The candidate-facing instructions state only the `raw` loss metric; the reward transformation and pass criteria appear solely in `task.toml`, `tests/test_outputs.py`, and this document.
 
-The final evaluation grade is binary: 1 when all 24 checks pass (including accuracy at default and all test windows), 0 otherwise.
+The final evaluation grade is binary: 1 when all 25 checks pass (including accuracy at default and all test windows), 0 otherwise.
 
 ### Why these constants
 
@@ -142,12 +142,13 @@ All runs executed under `--network none --cpus 4 --memory 8g`, using the agent i
 |---|---|---|
 | oracle (reference), grade 1 | 1 | 23/23 passed, suite 132 s (previous 23-check suite) |
 | oracle (reference), grade 2 | 1 | 23/23 passed, suite 134 s; fresh `solve.sh` into a new volume gave a byte-identical submission (previous suite) |
-| oracle (reference), grade 3 | 1 | 24/24 passed, suite 175 s (current suite, host shared with two other runs) |
+| oracle (reference), grade 3 | 1 | 24/24 passed, suite 175 s (intermediate 24-check suite, host shared with two other runs) |
+| oracle (reference), grade 4 | 1 | 25/25 passed, suite 184 s (current suite, host shared with two other runs) |
 | nop (empty submission) | 0 | fails closed: no `/app/submission/predict.py` |
 | naive baseline (`/app/baseline/predict.py`) | 0 | 12/23 on the previous suite; fails the accuracy bar (raw 1.768 at 24 h) |
 | constant output | 0 | 11/23 on the previous suite; one value copied to every subject, fails the accuracy bar |
 | dose-and-covariate regression shortcut | 0 | 13/23 on the previous suite; fails the accuracy bar at raw 0.514 (it scored reward 0.499 before this revision) |
-| tamper probe: the reference predictor, plus a write into `/app/submission` only when `--horizon-h` is given | 0 | current suite: 22/24, fails `test_horizon_accuracy_matches_truth` and `test_zz_nothing_modified_after_all_runs`. The previous suite scored the same probe 1 (23/23), which is why the check was extended. |
+| tamper probe: the reference predictor, plus a write into `/app/submission` only when `--horizon-h` is given | 0 | current suite: 22/25, fails `test_r5_input_directory_and_submission_left_untouched`, `test_horizon_accuracy_matches_truth` and `test_zz_r5_nothing_modified_after_all_runs`. The previous 23-check suite scored the same probe 1 (23/23), which is why the check was extended. |
 
 Reference continuous rewards on the held-out cohort, scored in the verifier image:
 
@@ -174,9 +175,16 @@ Runtime: `solve.sh` takes roughly 22 s, and full-cohort prediction takes 3.6 s a
   - after the default runs (`test_inputs_unmodified`, `test_deterministic`);
   - after every held-out `--horizon-h` / `--estimator` run (`test_horizon_accuracy_matches_truth`);
   - before and after every toy run (`_run_toy`);
-  - once more after the whole suite (`test_zz_nothing_modified_after_all_runs`).
+  - in a dedicated criterion, `test_r5_input_directory_and_submission_left_untouched`. It runs the predictor on fresh read-only inputs in every invocation shape: default, horizons 6.05 and 47.95 h, both estimators, and two invalid calls. After each run it checks the inputs, the output directory and `/app/submission`;
+  - once more after the whole suite (`test_zz_r5_nothing_modified_after_all_runs`).
 * **What fails.** An added, removed or changed file, a symlink, or any extra file in an output directory fails its check.
 * **Measured.** A predictor that tampered only under `--horizon-h` passed the previous suite and scores 0 on this one (table above).
+
+| Instruction constraint | Criterion that enforces it | On violation |
+|---|---|---|
+| Leave the input directory unchanged | input SHA-256 + listing re-checked by `test_r5_input_directory_and_submission_left_untouched`, `test_inputs_unmodified` and `test_zz_r5_nothing_modified_after_all_runs`; toy inputs also before and after every toy run | check fails, reward 0 (floor) |
+| Leave `/app/submission` unchanged (bytecode caches excepted) | whole-tree fingerprint vs. suite start, after every run in `test_r5_input_directory_and_submission_left_untouched`, plus `test_inputs_unmodified` and the final sweep | check fails, reward 0 (floor) |
+| Write OUT.csv and no other file into the output directory | output directory listed after every run; only the requested OUT.csv names may exist; rejected calls must write nothing | check fails, reward 0 (floor) |
 
 **Infrastructure failure.** `tests/test.sh` writes reward 0 before execution begins, updating it only upon a clean pytest exit. It fails closed, retaining reward 0 and emitting messages to stderr, if:
 - the reward directory cannot be locked;
@@ -194,7 +202,7 @@ Submissions that crash, exceed runtime limits (180 s per-run ceiling), or are te
 
 Given deterministic evaluation and binary scoring, observed variance is 0.0, establishing a regrade tolerance of 0.0.
 
-### Requirement-to-check map (`tests/test_outputs.py`, 24 checks)
+### Requirement-to-check map (`tests/test_outputs.py`, 25 checks)
 
 | Instruction requirement | Checks |
 |---|---|
@@ -203,7 +211,7 @@ Given deterministic evaluation and binary scoring, observed variance is 0.0, est
 | Finishes within the runtime budget | `test_runtime_budget` |
 | Accuracy on the held-out cohort (reward >= 0.50) | `test_accuracy_pass_bar` |
 | Two runs agree | `test_deterministic`, `test_optional_modes_are_deterministic` |
-| Writes only OUT.csv; inputs and submission untouched (every run, every mode) | `test_inputs_unmodified`, `test_deterministic`, `test_horizon_accuracy_matches_truth`, `test_zz_nothing_modified_after_all_runs`, plus the toy-run guards in every covariate/horizon/estimator check |
+| Writes only OUT.csv; inputs and submission untouched (every run, every mode) | `test_r5_input_directory_and_submission_left_untouched` (the criterion), `test_inputs_unmodified`, `test_deterministic`, `test_horizon_accuracy_matches_truth`, `test_zz_r5_nothing_modified_after_all_runs`, plus the toy-run guards in every covariate/horizon/estimator check |
 | Covariate fallbacks (70 kg, 45 years, M), per field, others unchanged | `test_covariates_missing_row_falls_back`, `test_covariates_unusable_weight_falls_back`, `test_covariates_unusable_sex_falls_back`, `test_covariates_unusable_age_falls_back`, `test_covariates_fallback_matches_default_row`, `test_covariates_fallback_leaves_others_unchanged` |
 | `--horizon-h`: default = 24, exact window, graded accuracy, invalid values rejected | `test_horizon_default_matches_explicit_24`, `test_horizon_accuracy_matches_truth`, `test_horizon_window_additivity`, `test_horizon_rejects_invalid_values` |
 | `--estimator`: default = map, population ignores samples and ids, responds to dose and weight, differs from map, invalid values rejected | `test_estimator_default_matches_explicit_map`, `test_estimator_population_ignores_samples`, `test_estimator_population_ignores_subject_id`, `test_estimator_population_responds_to_dosing_and_covariates`, `test_estimator_population_differs_from_map`, `test_estimator_rejects_invalid_values` |
@@ -212,7 +220,7 @@ Given deterministic evaluation and binary scoring, observed variance is 0.0, est
 
 In the previous release, a 15-line linear regression of dose and covariates scored reward 0.499 against the 0.50 threshold, and the memo provided exact population parameters. This revision strengthens evaluation rigor while preserving the scoring formula and pass criteria:
 
-* **Do-not-modify enforcement:** the input and submission-tree hash checks now run after every held-out run in every mode and in a final sweep (24 checks, was 23). A flag-gated tamper probe that passed the old suite now scores 0.
+* **Do-not-modify enforcement:** the input and submission-tree hash checks now run after every held-out run in every mode, in a dedicated R5 criterion that exercises every invocation shape, and in a final sweep (25 checks, was 23). A flag-gated tamper probe that passed the old suite now scores 0.
 * **Truth model:** concentration-driven enzyme-turnover autoinduction (replacing a static Hill model), absorption lag, age scaling on CL0, wider parameter variance, LLOQ raised from 1.00 to 2.50 ng/mL, and intra-study dose titration (2x increase from Day 8 for ~70% of subjects).
 * **Sparse design:** sampling on Days 1, 4, and 7 (previously 1, 7, and 11), strictly preceding dose titration.
 * **Data:** visible cohorts regenerated; `rich/targets.csv` deleted.
