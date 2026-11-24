@@ -1,164 +1,195 @@
 #!/usr/bin/env python3
-"""Fit population pharmacokinetic priors from the visible rich cohort.
+"""Fit the population model on the visible cohorts and save it as pop_params.json.
 
-Censored-likelihood one-compartment oral model with Emax autoinduction of apparent
-clearance. Samples flagged censored=1 contribute their below-LLOQ likelihood (the
-observation was only known to be under 1.00 ng/mL) rather than being dropped --
-this is the signal a time-invariant, BLQ-dropping fit throws away.
+Model: oral absorption with lag, one central compartment, clearance CL0 * E(t) where E
+is an enzyme pool induced by the drug (turnover with kenz, stimulation Emax*C/(EC50+C)).
+Covariates on the typical values: allometric weight (V ~ WT^1, CL0 ~ WT^0.75), a power
+of age on CL0, and a sex factor on CL0 and on V.
 
-Two stages:
-  1. pooled fit of the typical values (ka, V, CL0, Emax, ET50) with a censored
-     likelihood over every rich subject;
-  2. empirical-Bayes estimates of the inter-individual SDs: per-subject MAP etas
-     are fitted against those typical values and their SDs are recorded as priors.
+Below-LLOQ samples enter through their censored likelihood (Beal M3), never dropped
+and never imputed.
 
-Writes a JSON parameter artifact consumed by predict.py. Reads /app/data only; no
-network, no randomness (deterministic given the input files).
+Estimation, all deterministic:
+  1. naive pooled fit of the typical values and covariate effects on the rich cohort;
+  2. iterative two-stage: per-subject MAP random effects on rich + sparse subjects,
+     then typical values, covariate effects, between-subject SDs and residual error are
+     re-estimated from those fits; repeated until the typical values settle.
+
+Usage: fit_population.py OUT.json [DATA_DIR]   (reads /app/data by default; writes only OUT.json)
 """
 import csv
 import json
 import math
 import os
 import sys
+from multiprocessing import Pool
 
 import numpy as np
 from scipy.optimize import least_squares
 
-LLOQ = 1.0
-HILL = 1.6
-DATA = "/app/data/rich"
-DT = 0.1
-SEX_V = {"M": 1.06, "F": 0.95}
-SEX_CL = {"M": 1.05, "F": 0.95}
-PARAM_NAMES = ("ka", "V", "cl0", "emax", "et50")
-WEIGHT_CL_EXP = 0.75
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import pk_engine as E  # noqa: E402
+
+DATA = sys.argv[2] if len(sys.argv) > 2 else "/app/data"
+LLOQ = 2.50   # ng/mL, the assay limit stated in the task
+FIT_STEP = 0.25
+N_ITS = 4
+#: Residual error assumed for the first pass, before it is estimated from the fits.
+START_SIGMA = (0.15, 0.3)
 
 
 def read(path):
-    with open(path, newline="") as f:
-        return list(csv.DictReader(f))
+    with open(path, newline="") as fh:
+        return list(csv.DictReader(fh))
 
 
-def load(data_dir):
-    doses = {}
-    for r in read(data_dir + "/doses.csv"):
+def load(cohort):
+    d = os.path.join(DATA, cohort)
+    doses, pts = {}, {}
+    for r in read(os.path.join(d, "doses.csv")):
         doses.setdefault(r["subject_id"], []).append(
             (float(r["dose_time_h"]), float(r["dose_mg"]), int(float(r["administered"]))))
-    samples = {}
-    for r in read(data_dir + "/samples.csv"):
-        samples.setdefault(r["subject_id"], []).append(
-            (float(r["sample_time_h"]), float(r["concentration_ng_ml"]),
-             int(float(r["censored"]))))
-    cov = {r["subject_id"]: r for r in read(data_dir + "/covariates.csv")}
-    return doses, samples, cov
+    for r in read(os.path.join(d, "samples.csv")):
+        pts.setdefault(r["subject_id"], []).append(
+            (float(r["sample_time_h"]), float(r["concentration_ng_ml"]), int(float(r["censored"]))))
+    cov = {r["subject_id"]: r for r in read(os.path.join(d, "covariates.csv"))}
+    subjects = []
+    for sid in sorted(doses):
+        c = cov[sid]
+        s = sorted(pts.get(sid, []))
+        subjects.append({
+            "sid": sid, "events": doses[sid], "wt": float(c["body_weight_kg"]),
+            "age": float(c["age_years"]), "sex": c["sex"],
+            "t": [x[0] for x in s], "obs": np.array([x[1] for x in s]),
+            "cens": np.array([x[2] for x in s], dtype=int),
+        })
+    return subjects
 
 
-def simulate(ka, V, cl0, emax, et50, events, t_end, dt=DT):
-    n = int(round(t_end / dt)) + 1
-    grid = np.arange(n) * dt
-    conc = np.empty(n)
-    conc[0] = 0.0
-    agut = ac = 0.0
-    at = {}
-    for th, dm, adm in events:
-        if adm:
-            j = int(round(th / dt))
-            if 0 <= j < n:
-                at[j] = at.get(j, 0.0) + dm
-    for i in range(n - 1):
-        if i in at:
-            agut += at[i]
-        tm = max(grid[i] + 0.5 * dt, 0.0)
-        tn = tm ** HILL
-        k = cl0 * (1.0 + emax * tn / (et50 ** HILL + tn)) / V
-        eka = math.exp(-ka * dt)
-        ek = math.exp(-k * dt)
-        if abs(k - ka) > 1e-9:
-            ac_new = ac * ek + ka * agut * (eka - ek) / (k - ka)
-        else:
-            ac_new = ac * ek + ka * agut * dt * eka
-        agut, ac = agut * eka, ac_new
-        conc[i + 1] = ac / V * 1000.0
-    return grid, conc
+def typical_for(model, wt, age, sex):
+    """Covariate-adjusted typical parameters for one subject."""
+    th, cv = model["typical"], model["covariates"]
+    fem = sex == "F"
+    return {
+        "ka": th["ka"], "tlag": th["tlag"], "emax": th["emax"], "ec50": th["ec50"],
+        "kenz": th["kenz"],
+        "V": th["V"] * (wt / 70.0) * (cv["sex_v_f"] if fem else 1.0),
+        "cl0": (th["cl0"] * (wt / 70.0) ** 0.75 * (age / 45.0) ** cv["age_cl_exp"]
+                * (cv["sex_cl_f"] if fem else 1.0)),
+    }
 
 
-def censored_residual(pred, conc, censored):
-    pred = max(pred, 1e-9)
-    if censored:
-        # A BLQ observation means only that the TRUE concentration was below LLOQ. Under a
-        # squared-error objective the one-sided contribution is the part of the prediction
-        # that violates that bound: penalise pred > LLOQ (max, positive) and leave pred <= LLOQ
-        # unpenalised (0). Using min() here would be inverted - it would reward a prediction
-        # above LLOQ and drive every censored trough up, discarding the induction signal.
-        return max(0.0, math.log(pred) - math.log(LLOQ))
-    return math.log(pred) - math.log(max(conc, 1e-9))
+def with_eta(p, eta):
+    return {k: p[k] * math.exp(e) for k, e in zip(E.PARAMS, eta)}
+
+
+def map_fit(args):
+    """Per-subject MAP random effects under the current population model."""
+    subj, model = args
+    sd = np.array([model["iiv_sd"][k] for k in E.PARAMS])
+    sp, sa = model["sigma_prop"], model["sigma_add"]
+    p0 = typical_for(model, subj["wt"], subj["age"], subj["sex"])
+
+    def res(eta):
+        pred = E.predict_at(with_eta(p0, eta), subj["events"], subj["t"], FIT_STEP)
+        return np.concatenate([E.residuals(pred, subj["obs"], subj["cens"], model["lloq"], sp, sa),
+                               eta / sd])
+
+    fit = least_squares(res, np.zeros(7), method="trf", x_scale=sd, max_nfev=80)
+    pred = E.predict_at(with_eta(p0, fit.x), subj["events"], subj["t"], FIT_STEP)
+    m = subj["cens"] == 0
+    return fit.x, pred[m], subj["obs"][m]
+
+
+def pooled_fit(subjects, lloq):
+    """Naive pooled censored fit: log typical values plus age exponent and sex factors."""
+    names = list(E.PARAMS) + ["age_cl_exp", "log_sex_cl_f", "log_sex_v_f"]
+    start = np.array([math.log(v) for v in (1.0, 0.3, 300.0, 15.0, 5.0, 20.0, 0.01)] + [0.0, 0.0, 0.0])
+
+    def unpack(x):
+        model = {"typical": {k: math.exp(v) for k, v in zip(E.PARAMS, x[:7])},
+                 "covariates": {"age_cl_exp": x[7], "sex_cl_f": math.exp(x[8]),
+                                "sex_v_f": math.exp(x[9])}}
+        return model
+
+    def res(x):
+        model = unpack(x)
+        out = []
+        for s in subjects:
+            p = typical_for(model, s["wt"], s["age"], s["sex"])
+            pred = E.predict_at(p, s["events"], s["t"], 0.5)
+            out.append(E.residuals(pred, s["obs"], s["cens"], lloq, *START_SIGMA))
+        return np.concatenate(out)
+
+    lo = np.array([math.log(v) for v in (0.05, 0.01, 30.0, 1.0, 0.05, 0.5, 1e-4)] + [-2.0, -1.0, -1.0])
+    hi = np.array([math.log(v) for v in (10.0, 3.0, 3000.0, 150.0, 100.0, 1000.0, 0.5)] + [2.0, 1.0, 1.0])
+    x = least_squares(res, start, bounds=(lo, hi), method="trf", max_nfev=60).x
+    print("pooled:", dict(zip(names, np.round(x, 3))), file=sys.stderr)
+    return unpack(x)
 
 
 def main():
-    doses, samples, cov = load(DATA)
-    ids = sorted(doses)
-
-    def pooled_res(theta):
-        ka, V, cl0, emax, et50 = np.exp(theta)
-        out = []
-        for sid in ids:
-            ev = doses[sid]
-            t_end = max(e[0] for e in ev) + 24.0
-            g, c = simulate(ka, V, cl0, emax, et50, ev, t_end + 1.0)
-            for ts, conc, cens in samples.get(sid, []):
-                out.append(censored_residual(float(np.interp(ts, g, c)), conc, cens))
-        return np.asarray(out)
-
-    start = np.log([1.1, 300.0, 15.0, 1.2, 120.0])
-    ka, V0, cl0, emax, et50 = np.exp(
-        least_squares(pooled_res, start, max_nfev=120).x)
-
-    # Stage 2: estimate the inter-individual SDs empirically. Each subject's etas are
-    # fitted with WEAK priors, so the spread of the fitted etas reflects real between-
-    # subject variability rather than being shrunk to the prior. The visible rich cohort
-    # has dense day-1 and day-14 profiles, so these etas are well identified.
-    seed_sd = np.array([3.0, 3.0, 3.0, 3.0, 3.0])
-    etas = []
-    for sid in ids:
-        ev = doses[sid]
-        w = float(cov[sid]["body_weight_kg"])
-        sex = cov[sid]["sex"]
-        Vt = V0 * (w / 70.0) * SEX_V[sex]
-        CLt = cl0 * (w / 70.0) ** WEIGHT_CL_EXP * SEX_CL[sex]
-        t_end = max(e[0] for e in ev) + 24.0
-        pts = samples.get(sid, [])
-
-        def resid(eta):
-            g, c = simulate(ka * math.exp(eta[0]), Vt * math.exp(eta[2]),
-                            CLt * math.exp(eta[1]), emax * math.exp(eta[3]),
-                            et50 * math.exp(eta[4]), ev, t_end + 1.0)
-            r = [censored_residual(float(np.interp(ts, g, c)), conc, cens)
-                 for ts, conc, cens in pts]
-            r.extend((eta / seed_sd).tolist())
-            return np.asarray(r)
-
-        try:
-            etas.append(least_squares(resid, np.zeros(5), method="trf",
-                                      max_nfev=40).x)
-        except Exception:  # noqa: BLE001 - a single bad subject must not abort the fit
-            continue
-    eta_arr = np.asarray(etas)
-    sd = eta_arr.std(axis=0) if len(eta_arr) > 1 else np.full(5, 0.2)
-    # Keep the priors in a plausible physiological band; a wild subject must not blow them up.
-    sd = np.clip(sd, 0.05, 0.6)
-
-    artifact = {
-        "typical": {"ka": float(ka), "V": float(V0), "cl0": float(cl0),
-                    "emax": float(emax), "et50": float(et50)},
-        "iiv_sd": {"ka": float(sd[0]), "cl0": float(sd[1]), "V": float(sd[2]),
-                   "emax": float(sd[3]), "et50": float(sd[4])},
-        "hill": HILL, "lloq": LLOQ,
-    }
     out_path = sys.argv[1] if len(sys.argv) > 1 else "/app/submission/pop_params.json"
+    rich, sparse = load("rich"), load("sparse")
+    lloq = LLOQ
+
+    model = pooled_fit(rich, lloq)
+    model.update({"iiv_sd": {k: 0.5 for k in E.PARAMS},
+                  "sigma_prop": START_SIGMA[0], "sigma_add": START_SIGMA[1], "lloq": lloq})
+
+    everyone = rich + sparse
+    for it in range(N_ITS):
+        with Pool(4) as pool:
+            fits = pool.map(map_fit, [(s, model) for s in everyone])
+        etas = np.array([f[0] for f in fits])
+
+        # Typical values move by the mean random effect; covariate effects on CL0 and V
+        # are refreshed by regressing their random effects on log(age/45) and sex.
+        th = dict(model["typical"])
+        for j, k in enumerate(E.PARAMS):
+            if k not in ("cl0", "V"):
+                th[k] *= math.exp(float(etas[:, j].mean()))
+        cv = dict(model["covariates"])
+        fem = np.array([1.0 if s["sex"] == "F" else 0.0 for s in everyone])
+        lage = np.array([math.log(s["age"] / 45.0) for s in everyone])
+        j_cl, j_v = E.PARAMS.index("cl0"), E.PARAMS.index("V")
+        X = np.column_stack([np.ones(len(everyone)), lage, fem])
+        b_cl = np.linalg.lstsq(X, etas[:, j_cl], rcond=None)[0]
+        th["cl0"] *= math.exp(b_cl[0])
+        cv["age_cl_exp"] += b_cl[1]
+        cv["sex_cl_f"] *= math.exp(b_cl[2])
+        b_v = np.linalg.lstsq(X[:, [0, 2]], etas[:, j_v], rcond=None)[0]
+        th["V"] *= math.exp(b_v[0])
+        cv["sex_v_f"] *= math.exp(b_v[1])
+        resid_eta = etas.copy()
+        resid_eta[:, j_cl] -= X @ b_cl
+        resid_eta[:, j_v] -= X[:, [0, 2]] @ b_v
+
+        # Between-subject SDs from the rich fits only (dense data, little shrinkage), so
+        # the priors are not pulled toward zero by the barely informed sparse subjects.
+        n_rich = len(rich)
+        sd = np.clip(resid_eta[:n_rich].std(axis=0) * 1.15, 0.08, 0.8)
+
+        # Residual error: least-squares fit of the combined error model to the measured
+        # samples' squared residuals.
+        pred = np.concatenate([f[1] for f in fits])
+        obs = np.concatenate([f[2] for f in fits])
+        A = np.column_stack([pred ** 2, np.ones_like(pred)])
+        coef = np.linalg.lstsq(A, (obs - pred) ** 2, rcond=None)[0]
+        model.update({
+            "typical": th, "covariates": cv,
+            "iiv_sd": {k: float(v) for k, v in zip(E.PARAMS, sd)},
+            "sigma_prop": float(np.clip(math.sqrt(max(coef[0], 1e-6)), 0.05, 0.4)),
+            "sigma_add": float(np.clip(math.sqrt(max(coef[1], 1e-6)), 0.05, 1.5)),
+        })
+        print(f"iteration {it + 1}: " + json.dumps(
+            {k: round(v, 4) for k, v in th.items()}), file=sys.stderr)
+
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w") as fh:
-        json.dump(artifact, fh, indent=2, sort_keys=True)
-    print(f"wrote {out_path}: {json.dumps(artifact['typical'])}")
+        json.dump(model, fh, indent=2, sort_keys=True)
+    print(f"wrote {out_path}")
 
 
 if __name__ == "__main__":

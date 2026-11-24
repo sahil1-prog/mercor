@@ -1,45 +1,43 @@
-# Internal memo — MAD-102 exposure analysis (interim, day-14 not yet reported)
+# Internal memo - MAD-102 exposure analysis (interim, day-1 data-cut)
 
 **To:** Phase-2 dose-selection working group
 **From:** Clinical pharmacology analyst
-**Date:** interim (analysis frozen after day-7 data-cut)
+**Date:** interim (analysis frozen at the day-1 data-cut; later samples not reviewed)
 
 ## Summary
 
-We fitted a pooled oral one-compartment model to the day-1 profiles from the rich
-cohort. The fit is stable and the diagnostics are acceptable. **We recommend
-using this time-invariant model for the phase-2 dose selection.** Apparent
-clearance is constant over the dosing interval and over the study, and there is
-no evidence of time-dependent pharmacokinetics in the day-1 data.
+We fitted a pooled oral one-compartment model with first-order absorption and
+constant clearance to the day-1 profiles of the rich cohort. The fit converged and
+we recommend this time-invariant, dose-proportional model for forecasting day-14
+exposure, including for subjects titrated to the higher dose from day 8.
 
-## Final parameter estimates (time-invariant model)
+## Parameter estimates (time-invariant model, day-1 data)
 
 | Parameter | Estimate | Units |
 |-----------|----------|-------|
-| ka        | 1.10     | 1/h   |
-| V         | 300.0    | L     |
-| CL        | 15.0     | L/h   |
-| IIV CL    | 24%      | CV    |
-| IIV V     | 22%      | CV    |
-| Residual  | 12%      | CV (proportional) |
+| ka        | 0.48     | 1/h   |
+| V         | 265      | L     |
+| CL        | 20.0     | L/h   |
+| IIV CL    | 48%      | CV    |
+| IIV V     | 35%      | CV    |
+| Residual  | 39%      | CV (proportional, log scale) |
 
-Body weight and sex were tested as covariates and were **not** retained; the
-apparent trends did not reach significance in the rich cohort and we recommend
-not adjusting for them.
+405 of the 553 day-1 samples were used; the rest were reported below the assay
+LLOQ and were excluded.
 
 ## Notes on the data
 
-- Samples reported as `censored=1` (below the 1.00 ng/mL assay LLOQ) were
-  **excluded** from the fit. Imputing or modelling them was judged unnecessary
-  because the excluded samples are few and all occur at trough.
-- Day-14 profiles were collected but the exposure summary was not computed at
-  the time of this data-cut; the interim conclusion is that day-14 exposure
-  will be close to day-1 exposure because clearance does not change.
-- The onward phase-2 cohort need not be re-modelled; apply the point estimates
-  above to each subject and integrate the day-14 interval.
+- Samples reported as `censored=1` were **excluded** from the fit. They are trough
+  and late-absorption samples and were judged uninformative.
+- Body weight, age and sex were not tested as covariates at this data-cut.
+- The residual error is larger than the assay validation suggests; we attribute this
+  to sample-handling variability at the clinical site rather than to the model.
+- No evidence of an absorption delay was looked for; the 0.25 h and 0.5 h samples
+  were mostly below the LLOQ and dropped with the rest.
 
 ## Recommendation
 
-Use AUCss ≈ AUC after a single dose scaled by the number of doses, with Cmax
-and Ctrough from the same time-invariant simulation. No induction or
-autoinduction term is warranted.
+Apply the point estimates above to each subject's dose rows and integrate the day-14
+interval. Exposure scales linearly with dose, so a subject stepped up to twice the
+starting dose from day 8 is expected to reach twice the starting-dose exposure by
+day 14. No time-dependent clearance term is warranted.

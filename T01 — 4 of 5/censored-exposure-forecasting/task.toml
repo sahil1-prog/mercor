@@ -17,20 +17,23 @@ tags = [
   "steady-state-exposure",
   "map-estimation",
   "oral-one-compartment",
+  "enzyme-turnover",
+  "dose-titration",
 ]
 expert_time_estimate_hours = 10.0
-difficulty_explanation = "The induction signal lives in censored troughs during sparse sampling; dropping BLQ samples or assuming time-invariant clearance biases every day-14 exposure forecast."
+difficulty_explanation = "Clearance is induced by the drug's own concentration through an enzyme pool, most subjects double their dose after the sampling period, and the induced troughs are largely below the LLOQ; the forecast must extrapolate a censored-likelihood population model through the titration step and into washout."
 
 # The graded reward is binary (the pipeline finale writes reward.txt from the suite's exit
 # status): a submission scores 1 only when EVERY check passes, including the stated pass bar
-# reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on the sealed held-out cohort (seed fixed in
-# tests/.truth/heldout.py). Measured here: the provided naive baseline scores reward 0.0
-# (raw 0.621, AUC/Cmax/Ctrough median relative errors 0.278/0.150/2.184), below the bar -> 0;
-# the reference in solution/ - censored-likelihood population priors fitted on /app/data/rich
-# plus induction-aware MAP individualization - scores 0.728 (raw 0.136) at the default
-# window, 0.733 / 0.832 / 0.728 at the graded 0.25 / 6.05 / 24.05 h windows, and 0.647 in
-# population mode, passing all 23 checks -> 1.
-# floor / nop = 0, baseline = 0 (the naive predictor is below the bar), reference = oracle = 1.
+# reward = clip(1 - raw/0.5, 0, 1) >= 0.50 on the held-out cohort at the default window and
+# at each graded window (tests/.truth/heldout.py EXTRA_HORIZONS = 1.05 / 6.05 / 24.05 /
+# 47.95 h).
+# 1.0 witness: the reference in solution/ (solve.sh) passes all 23 checks in local Docker
+# runs of both images; its continuous rewards are 0.783 (24 h) / 0.806 / 0.872 / 0.782 /
+# 0.667 at the graded windows. A perfect continuous reward is not reachable (censored
+# sparse data, assay noise), but the graded score is binary, so the witness scores 1.0.
+# Measured floor: nop, the naive baseline (raw 1.768), a constant output and a
+# dose-and-covariate regression shortcut (raw 0.514) all score 0. See README.md.
 [metadata.scoring]
 floor = 0.0
 baseline = 0.0
@@ -42,17 +45,21 @@ oracle = 1.0
 [agent]
 user = 1000  # pipeline: Dockerfile USER
 timeout_sec = 14400
+# No web search or downloads while the agent works; everything it needs ships in the image.
+network_mode = "no-network"
 
 [verifier]
 user = "root"
 environment_mode = "separate"
-# The suite rebuilds the 150-subject held-out cohort with truth at four forecast windows
-# (~50 s) and then runs the submission ~30 times: six full-cohort re-runs (2 at the default
-# window, 3 at non-default windows, 1 in population mode) plus ~24 runs on 3-subject toy
-# cohorts (~1 s each for a MAP fit). Each full-cohort run is graded against BUDGET_S = 180 s
-# (the stated 120 s contract plus a host-load grace); worst case 6*180 = 1080 s of predictor
-# time, which with setup and a 2x margin needs ~2200 s. 3000 s (the 3600 s cap allows it)
-# leaves headroom without a slow-but-legitimate submission timing out the verifier itself.
+network_mode = "no-network"
+# The suite rebuilds the 150-subject held-out cohort with truth at five forecast windows
+# (~5 s) and then runs the submission ~40 times: six full-cohort runs (2 at the default
+# window, 4 at the graded windows) plus ~35 runs on 3- or 4-subject toy cohorts. Each
+# full-cohort run is held to BUDGET_S = 180 s (the stated 120 s contract plus a host-load
+# grace); worst case 6*180 = 1080 s of predictor time plus toys and setup needs ~2200 s
+# with a 2x margin. The reference suite run measured 132 s in total. 3000 s (the 3600 s cap
+# allows it) leaves headroom without a slow-but-legitimate submission timing out the
+# verifier itself.
 timeout_sec = 3000
 
 [environment]

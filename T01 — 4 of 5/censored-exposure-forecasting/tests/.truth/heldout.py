@@ -2,7 +2,7 @@
 
 This module is the verifier's copy of the generative process. It is root-only
 under ``tests/`` and is never shipped to the solver image. It mirrors the
-authoring simulator byte for byte (``truth_model.py``) so the truth the grader
+authoring simulator (``truth_model.py``) so the truth the grader
 computes is the same process that produced the visible cohorts - but it uses a
 DIFFERENT secret seed and the sparse (no day-14 profile) sampling design.
 
@@ -31,11 +31,12 @@ INPUT_FILES = ("subjects.csv", "doses.csv", "samples.csv", "covariates.csv")
 TRUTH_FILE = "truth.csv"
 #: Forecast windows the grader asks for besides the default 24 h. Each gets its own
 #: root-only truth file so a submission's values are compared with the truth of the exact
-#: window it was asked for. None is a multiple of a plausible integration step, so a
-#: predictor that rounds the window onto a grid (the cheap bug at 0.25 h, where rounding to
-#: 0.1 h moves the window by 20 %), drops the partial final interval, or scales the 24 h
-#: answer by H/24 lands outside the accuracy bar.
-EXTRA_HORIZONS = (0.25, 6.05, 24.05)
+#: window it was asked for. 1.05 h sits on the absorption upswing just after the lag;
+#: 6.05 h spans the peak; 24.05 h is one dosing interval plus a sliver; 47.95 h runs two
+#: days into washout after the last dose, where the enzyme pool decays back toward
+#: baseline and clearance falls - a model whose induction ignores drug levels keeps
+#: clearance high there and misses the trough.
+EXTRA_HORIZONS = (1.05, 6.05, 24.05, 47.95)
 
 
 def truth_name(horizon):
@@ -81,8 +82,7 @@ def build(out_dir, horizons=(24.0,) + EXTRA_HORIZONS):
         for t_s, obs, cens, _kind in rows:
             samples.append([sid, f"{t_s:.4f}", f"{obs:.5f}", cens])
 
-        for h in truth:
-            tr = m.true_exposures(subj, events, h)
+        for h, tr in m.true_exposures_multi(subj, events, tuple(truth)).items():
             truth[h].append([sid, f"{tr['auc_ss']:.6f}", f"{tr['cmax_ss']:.6f}",
                              f"{tr['ctrough_ss']:.6f}"])
 

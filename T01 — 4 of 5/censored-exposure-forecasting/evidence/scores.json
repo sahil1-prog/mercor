@@ -5,49 +5,58 @@
       "kind": "baseline",
       "reward": 0.0,
       "who": "OpenWorldEngineer",
-      "agent": "OpenWorldEngineer (human expert author)",
-      "when": "2026-11-10",
-      "date": "2026-11-10",
-      "budget": "4 CPUs, 8 GB RAM, 180s per-run timeout, 3000s verifier timeout",
-      "receipt": "pytest 23 checks (0 passed, failed accuracy pass bar: reward=0.000 < 0.50)",
-      "note": "provided naive baseline predictor (/app/baseline/predict.py, empirical non-compartmental summary) evaluated on the sealed held-out cohort: continuous reward clip(1-raw/0.5,0,1)=0.0 (raw 0.621, AUC/Cmax/Ctrough median relative errors 0.278/0.150/2.184), below the 0.50 pass bar -> pipeline reward 0; fails accuracy check in 23-check test suite"
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g, verifier image from tests/Dockerfile",
+      "receipt": "pytest 12 passed, 11 failed; test_accuracy_pass_bar failed",
+      "note": "provided naive predictor /app/baseline/predict.py: raw 1.768 at the default window (median relative error AUC/Cmax/Ctrough 0.300/0.378/7.524) -> continuous reward 0.0 -> pipeline reward 0"
     },
     {
       "kind": "reference",
       "reward": 1.0,
       "who": "OpenWorldEngineer",
-      "agent": "OpenWorldEngineer (human expert author)",
-      "when": "2026-11-10",
-      "date": "2026-11-10",
-      "budget": "4 CPUs, 8 GB RAM, 180s per-run timeout, 3000s verifier timeout",
-      "receipt": "pytest 23/23 passed in 276.55s, ctrf report a594385e-13e9-47e0-9f84-a0438503408d",
-      "note": "censored-likelihood population priors on /app/data/rich + induction-aware MAP with per-field covariate fallback, caller-controlled forecast horizon, and map/population estimator switch (solution/predict_hardened.py over predict_reference.py); continuous reward 0.728 (raw 0.136) -> passes 0.50 bar -> pipeline reward 1; 23/23 checks passed"
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g; solve.sh in the agent image (22 s), suite in the verifier image",
+      "receipt": "pytest 23/23 passed in 132.30s",
+      "note": "solution/solve.sh: censored-likelihood population fit with enzyme-turnover induction on /app/data, MAP individualisation per subject. Continuous reward 0.783 (raw 0.109) at 24 h; 0.806 / 0.872 / 0.782 / 0.667 at the graded 1.05 / 6.05 / 24.05 / 47.95 h windows; population mode 0.508 (not graded for accuracy). One full-cohort forecast: 3.6 s."
     },
     {
       "kind": "regrade",
-      "rewards": [
-        1.0,
-        1.0
-      ],
+      "rewards": [1.0, 1.0],
       "who": "OpenWorldEngineer",
-      "agent": "OpenWorldEngineer (human expert author)",
-      "when": "2026-11-10",
-      "date": "2026-11-10",
-      "budget": "4 CPUs, 8 GB RAM, 180s per-run timeout, 3000s verifier timeout",
-      "receipt": "regrade run 1: 23/23 passed; regrade run 2: 23/23 passed (regrade_tolerance 0.0)",
-      "note": "sealed hardened oracle submission graded twice in fresh containers; both runs 23/23 pytest pass with identical outputs -> pipeline reward 1.0 each (span 0.0 <= regrade_tolerance 0.0)"
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g",
+      "receipt": "grade 1: 23/23 passed in 132.30s; grade 2: 23/23 passed in 134.41s",
+      "note": "grade 2 re-ran solve.sh into a fresh volume; pk_engine.py, pop_params.json and predict.py were byte-identical to grade 1 (span 0.0 <= regrade_tolerance 0.0)"
+    },
+    {
+      "kind": "probe",
+      "reward": 0.0,
+      "who": "OpenWorldEngineer",
+      "agent": "OpenWorldEngineer (human expert author), AI-assisted",
+      "when": "2026-11-24",
+      "date": "2026-11-24",
+      "budget": "local Docker, --network none --cpus 4 --memory 8g",
+      "receipt": "constant output: 11 passed, 12 failed; regression shortcut: 13 passed, 10 failed; both fail test_accuracy_pass_bar",
+      "note": "constant output (one value for every subject) -> 0. Dose-and-covariate regression of rich-cohort day-14 exposure per mg on weight, sex and age, no PK model: raw 0.514 at 24 h -> 0 (the same idea reached reward 0.499 on the previous revision)."
     }
   ],
-  "nop": [
-    0.0
-  ],
+  "nop": [0.0],
+  "studio_runs": [],
+  "studio_runs_note": "No Studio runs on this upload yet. Every run on the previous upload is void: the agent-visible data, instruction and grader changed.",
   "anti_cheat_checks": [
-    "graded cohort regenerated from a secret seed under tests/.truth/ (root-only); not shipped to the agent image",
-    "no day-14 sample in the graded cohort (assert_no_day14_samples) so exposure cannot be read off the input",
-    "output read with O_NOFOLLOW + realpath containment; input/output dirs root-owned, only out/ handed to the agent",
-    "input CSVs hashed before/after both runs (test_inputs_unmodified) so a predictor that rewrites inputs fails",
-    "R7 covariate fallback graded across multiple distinct inputs (missing row, blank/junk weight, blank/unknown sex, usable-value honoured) so a constant-output predictor fails",
-    "R8 horizon graded across distinct horizons (default, 6/24/36/48/96 h) and invalid values, so a constant-output or ignore-the-option predictor fails",
-    "R9 estimator graded by the sample-invariance property (population ignores samples, map follows them), so accepting the option but ignoring it fails"
+    "held-out cohort regenerated inside the verifier from tests/.truth (root-only), never present in the agent image",
+    "no held-out sample falls inside the day-14 window (assert_no_day14_samples), and all held-out samples precede the day-8 titration step",
+    "output read with O_NOFOLLOW + realpath containment; inputs root-owned; only the out/ directory is agent-writable",
+    "input CSVs and the submission tree hashed before and after runs (test_inputs_unmodified)",
+    "covariate fallbacks graded on several distinct fixtures (missing row, blank/junk weight, blank/junk/zero age, blank/unknown/lowercase sex)",
+    "horizon graded against truth at 1.05 / 6.05 / 24.05 / 47.95 h plus an additivity identity, so rounding or scaling the window fails",
+    "population mode graded by sample- and id-invariance with a map-mode control, so ignoring the option fails",
+    "visible-data generator and seeds kept outside the package"
   ]
 }

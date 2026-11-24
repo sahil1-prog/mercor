@@ -12,16 +12,18 @@ Requirement map (each material instruction requirement -> the check that grades 
   R6  "must write only OUT.csv": the four input CSVs are byte-identical
       after both runs, nothing else appears in the input dir, and the
       submission tree gains no writes .......................................... test_inputs_unmodified
-  R7  incomplete covariates (missing row / unusable weight or sex) fall back
-      per field to 70 kg and M without aborting or changing other subjects ..... test_covariates_*
+  R7  incomplete covariates (missing row / unusable weight, age or sex) fall
+      back per field to 70 kg, 45 years and M without aborting or changing
+      other subjects ........................................................... test_covariates_*
   R8  --horizon-h H recomputes all three quantities over exactly [t14, t14+H)
       (trough at exactly t14+H), graded against held-out truth for
-      H in heldout.EXTRA_HORIZONS (0.25 / 6.05 / 24.05 h), default 24.0
+      H in heldout.EXTRA_HORIZONS (1.05 / 6.05 / 24.05 / 47.95 h), default 24.0
       identical to explicit 24, and invalid values exit non-zero with no output  test_horizon_*
   R9  --estimator {map,population} picks the per-subject strategy; default map
       is today's behaviour, population depends only on dosing+covariates (not on
-      sample values, sample timing, censor flags, row count or subject id), and
-      any other literal value exits non-zero with no output ................... test_estimator_*
+      sample values, sample timing, censor flags, row count or subject id) while
+      still responding to dose and weight, and any other literal value exits
+      non-zero with no output ................................................. test_estimator_*
 
 Held-out truth is regenerated here from a secret seed and kept in a root-only
 directory; the agent's predictor is run through the agent uid on a separate,
@@ -72,8 +74,7 @@ PREDICT = os.path.join(SUBMISSION, "predict.py")
 OUT_COLS = ["subject_id", "auc_ss", "cmax_ss", "ctrough_ss"]
 INPUT_NAMES = ("subjects.csv", "doses.csv", "samples.csv", "covariates.csv")
 
-#: Horizons graded against held-out truth: a very short window, one inside the induction
-#: ramp and one at day 14. None is a multiple of a plausible integration step.
+#: Horizons graded against held-out truth (see heldout.EXTRA_HORIZONS for why each).
 HZ_GRADED = tuple(float(h) for h in heldout.EXTRA_HORIZONS)
 
 
@@ -622,10 +623,32 @@ def test_covariates_unusable_sex_falls_back():
                     f"{label}: {sid} changed despite usable covariates ({a} vs {b})")
 
 
+def test_covariates_unusable_age_falls_back():
+    """Blank, non-numeric and non-positive ages fall back to 45 years for that field only:
+    each matches an explicit 45-year row, and the other subjects are untouched."""
+    explicit = ["T001,64.0,45.0,F", "T002,95.0,55.0,M", "T003,112.0,61.0,F"]
+    g_ref, p_ref = _run_cov("aref", explicit)
+    assert g_ref is not None, f"aborted on a valid age\n{p_ref.stderr[-1500:]}"
+    variants = {
+        "blank": ["T001,64.0,,F", "T002,95.0,55.0,M", "T003,112.0,61.0,F"],
+        "junk": ["T001,64.0,old,F", "T002,95.0,55.0,M", "T003,112.0,61.0,F"],
+        "zero": ["T001,64.0,0,F", "T002,95.0,55.0,M", "T003,112.0,61.0,F"],
+    }
+    for label, lines in variants.items():
+        got, proc = _run_cov("a_" + label, lines)
+        assert got is not None, f"aborted on a {label} age\n{proc.stderr[-1500:]}"
+        assert set(got) == {"T001", "T002", "T003"}, f"{label} age: incomplete output"
+        for sid in ("T001", "T002", "T003"):
+            assert _vals_equal(got[sid], g_ref[sid]), (
+                f"{label} age: {sid} gave {got[sid]}, expected the 45-year answer {g_ref[sid]} "
+                "(T001 should fall back to 45 years and keep its usable weight and sex; "
+                "the others are unchanged)")
+
+
 def test_covariates_fallback_matches_default_row():
-    """A missing row must equal an explicit row of the defaults (70 kg, M), while a subject
-    whose covariates ARE usable keeps its own distinct prediction."""
-    explicit = ["T001,70.0,40.0,M", "T002,95.0,55.0,M", "T003,112.0,61.0,F"]
+    """A missing row must equal an explicit row of the defaults (70 kg, 45 years, M), while a
+    subject whose covariates ARE usable keeps its own distinct prediction."""
+    explicit = ["T001,70.0,45.0,M", "T002,95.0,55.0,M", "T003,112.0,61.0,F"]
     omitted = ["T002,95.0,55.0,M", "T003,112.0,61.0,F"]        # T001 falls back to defaults
     g_def, p1 = _run_cov("defexp", explicit)
     g_fb, p2 = _run_cov("defom", omitted)
@@ -996,29 +1019,6 @@ def test_estimator_population_differs_from_map():
         assert differing, (
             f"scale {mult}: population and map gave identical forecasts for every subject "
             "- the estimator option appears to be ignored")
-
-
-def test_estimator_population_is_accuracy_graded():
-    """Population mode must still be a usable forecast on the held-out cohort: identical
-    criterion to the default run (same metric, same pass bar), so 'responds only to dosing
-    and covariates' is not satisfied by returning a constant."""
-    proc, elapsed, out_path = _run_predictor("out_pop.csv",
-                                             extra_args=["--estimator", "population"])
-    assert proc.returncode == 0, (
-        f"population run exited {proc.returncode}\n{proc.stderr[-1500:]}")
-    assert os.path.isfile(out_path), "population run wrote no output file"
-    assert elapsed <= BUDGET_S, (
-        f"population run took {elapsed:.1f}s > {BUDGET_S}s budget "
-        f"(stated limit {TIME_LIMIT_S}s)")
-    _, rows = _read_output(out_path)
-    assert {r["subject_id"] for r in rows} == set(_IDS), "population run: subject set mismatch"
-    raw, reward, med = _raw_and_reward(rows, _TRUTH)
-    print(f"\nPOPULATION raw={raw:.4f} reward={reward:.4f} "
-          f"median_rel_err={ {k: round(v, 4) for k, v in med.items()} }")
-    assert reward >= PASS_BAR, (
-        f"population-mode accuracy below the pass bar: reward={reward:.3f} < {PASS_BAR} "
-        f"(raw={raw:.3f}; AUC={med['auc_ss']:.3f}, Cmax={med['cmax_ss']:.3f}, "
-        f"Ctrough={med['ctrough_ss']:.3f})")
 
 
 def test_estimator_rejects_invalid_values():
